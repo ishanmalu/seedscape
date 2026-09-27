@@ -5,8 +5,9 @@ import createModule from './cubiomes.mjs';
 const mod = await createModule();
 const BATCH_MS = 120; // report progress about this often
 
-self.onmessage = ({ data: { mc, conds, start, stride, block } }) => {
-  const flat = conds.flatMap((c) => [c.kind, c.id, c.radius]);
+self.onmessage = ({ data: { mc, conds, fromSpawn, start, stride, block } }) => {
+  // Packed as [kind, id, radius, count, extra] per condition (see sm_find).
+  const flat = conds.flatMap((c) => [c.kind, c.id, c.radius, c.count ?? 1, c.extra ?? 0]);
   const cp = mod._malloc(flat.length * 4);
   mod.HEAP32.set(flat, cp >> 2);
 
@@ -19,7 +20,7 @@ self.onmessage = ({ data: { mc, conds, start, stride, block } }) => {
     while (performance.now() - t0 < BATCH_MS) {
       // This worker owns seeds [base, base + block), then jumps by stride.
       const n = Math.min(size, block - Number(base % BigInt(block)));
-      const hits = mod._sm_find(mc, base, n, cp, conds.length, 256);
+      const hits = mod._sm_find(mc, base, n, cp, conds.length, fromSpawn ? 1 : 0, 256);
       const done = mod._sm_fdone(); // < n if the result buffer filled up
       const sp = mod._sm_fout_seed() >> 3, pp = mod._sm_fout_pos() >> 2;
       for (let i = 0; i < hits; i++)

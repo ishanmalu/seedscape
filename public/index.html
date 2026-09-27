@@ -40,6 +40,7 @@
         <option value="24">1.19.3–4</option>
         <option value="23">1.19–1.19.2</option>
         <option value="22">1.18</option>
+        <option value="bedrock">Bedrock (biomes)</option>
       </select>
       <button id="random" class="ghost" title="Random seed" aria-label="Random seed">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg>
@@ -60,7 +61,12 @@
       <span>Layers</span>
       <svg class="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
     </button>
-    <div class="card-body" id="layers"></div>
+    <div class="card-body">
+      <div id="view-opts"></div>
+      <div id="layers"></div>
+      <div class="group legend-head">Biomes in view <small>click to find nearest</small></div>
+      <ol id="legend"></ol>
+    </div>
   </section>
 
   <!-- Top-right: view mode + share -->
@@ -83,6 +89,15 @@
       <button type="submit" class="ghost">Go</button>
       <button type="button" id="add-pin" class="ghost" title="Pin these coordinates" aria-label="Pin these coordinates"></button>
     </form>
+    <div class="locate">
+      <select id="locate-biome" aria-label="Biome to find"><option value="">Find nearest biome…</option></select>
+    </div>
+    <div class="wp-head" id="wp-head" hidden>
+      <span>Pins</span>
+      <button class="icon-btn" id="wp-export" title="Export pins" aria-label="Export pins"></button>
+      <button class="icon-btn" id="wp-import" title="Import pins" aria-label="Import pins"></button>
+      <input type="file" id="wp-file" accept=".json,.txt" hidden>
+    </div>
     <ol id="waypoints" aria-label="Waypoints"></ol>
     <ol id="nearby"></ol>
   </section>
@@ -94,7 +109,12 @@
       <button id="close-finder" class="icon-btn" aria-label="Close finder"></button>
     </div>
     <div class="finder-body">
-      <p class="lede">Seeds where every condition is within range of 0, 0.</p>
+      <label class="lede">Distances from
+        <select id="find-from" aria-label="Measure distances from">
+          <option value="origin">0, 0</option>
+          <option value="spawn">world spawn</option>
+        </select>
+      </label>
       <div id="conds"></div>
       <button id="add-cond" class="ghost add-cond"></button>
       <label class="start">
@@ -117,7 +137,12 @@
   <div class="glass" id="zoom">
     <button id="zoom-in" class="ghost" aria-label="Zoom in">+</button>
     <button id="zoom-out" class="ghost" aria-label="Zoom out">−</button>
+    <span class="sep"></span>
+    <button id="tool-ruler" class="ghost"></button>
+    <button id="tool-portal" class="ghost"></button>
   </div>
+  <div class="glass pill" id="toast" role="status" hidden></div>
+  <div class="glass" id="details" hidden></div>
   <div class="glass" id="toolbar3d" hidden>
     <div class="seg" id="sizes" role="radiogroup" aria-label="3D area">
       <button role="radio" data-s="4">800</button>

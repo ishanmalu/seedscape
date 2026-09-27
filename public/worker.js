@@ -1,10 +1,69 @@
 // Generation worker: owns one cubiomes instance and renders map tiles.
 import createModule from './cubiomes.mjs';
+import { PALETTES, hexRGB } from './palette.js';
 
 const TILE = 256;
 const SEA = 63;
+const END_ISLANDS = 1000; // pseudo structure type for small End islands
+const CACHE_V = 4;        // bump when tile output changes, to ignore old cache entries
 const mod = await createModule();
 let current = '';
+
+// ---------- tile cache (IndexedDB) ----------
+// Generated tiles are kept between visits so returning to a seed is instant.
+// Failures (private mode, quota) just mean no caching.
+const db = new Promise((resolve) => {
+  try {
+    const req = indexedDB.open('seedscape-tiles', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('tiles').createIndex('t', 't');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  } catch { resolve(null); }
+});
+async function cacheGet(key) {
+  const d = await db;
+  if (!d) return null;
+  return new Promise((res) => {
+    try {
+      const r = d.transaction('tiles').objectStore('tiles').get(key);
+      r.onsuccess = () => res(r.result ?? null);
+      r.onerror = () => res(null);
+    } catch { res(null); }
+  });
+}
+async function cachePut(key, value) {
+  const d = await db;
+  if (!d) return;
+  try { d.transaction('tiles', 'readwrite').objectStore('tiles').put({ ...value, t: Date.now() }, key); } catch {}
+}
+// Keep the cache under ~4000 entries by dropping the oldest.
+async function prune() {
+  const d = await db;
+  if (!d) return;
+  const store = d.transaction('tiles', 'readwrite').objectStore('tiles');
+  const count = await new Promise((res) => { const r = store.count(); r.onsuccess = () => res(r.result); r.onerror = () => res(0); });
+  if (count < 4000) return;
+  let drop = count - 3000;
+  store.index('t').openKeyCursor().onsuccess = (e) => {
+    const c = e.target.result;
+    if (!c || drop-- <= 0) return;
+    store.delete(c.primaryKey);
+    c.continue();
+  };
+}
+
+// Biome colours follow the palette named in each request; switching is cheap.
+let palette = 'classic';
+function usePalette(name) {
+  if (name === palette || !PALETTES[name]) return;
+  mod._sm_reset_colors();
+  const table = PALETTES[name];
+  for (let id = 0; id < 256; id++) {
+    const hex = table[mod.UTF8ToString(mod._sm_biome_name(id))];
+    if (hex) mod._sm_set_color(id, ...hexRGB(hex));
+  }
+  palette = name;
+}
 
 function init(mc, seed, dim) {
   const key = `${mc}|${seed}|${dim}`;
@@ -66,42 +125,89 @@ function shade(rgba, hs, cells, s) {
     }
 }
 
-function tile({ tx, tz, bpp, structs, relief }) {
+// Biome image (+ biome ids and slime chunks) for one tile. `y` is a block
+// height for an underground slice, or null for the surface.
+async function tile({ tx, tz, bpp, relief, y, mc, seed, dim }) {
+  const key = `b|${CACHE_V}|${mc}|${seed}|${dim}|${relief ? 1 : 0}|${y ?? 's'}|${palette}|${bpp}|${tx}|${tz}`;
+  const hit = await cacheGet(key);
+  if (hit) return { bitmap: await createImageBitmap(hit.png), ids: hit.ids, cells: hit.cells, slime: hit.slime };
+  // Messages can interleave while awaiting the cache; restore this request's
+  // generator and palette before generating.
+  init(mc, seed, dim);
+  usePalette(key.split('|')[7]);
+
   const span = TILE * bpp;
   const s = cellScale(bpp);
   const cells = span / s;
   const x0 = tx * span, z0 = tz * span;
-  const y = s === 4 ? 16 : s === 16 ? 4 : s === 64 ? 1 : 0;
+  // "Surface" samples at the top of the world: 1.18+ cave biomes (lush caves,
+  // deep dark...) only exist below ground, so this gives what a player sees.
+  const cy = Math.floor((y ?? 320) / s);
 
-  const ptr = mod._sm_biomes(s, x0 / s, z0 / s, cells, cells, y);
+  const ptr = mod._sm_biomes(s, x0 / s, z0 / s, cells, cells, cy);
   if (!ptr) return null;
   const rgba = new Uint8ClampedArray(mod.HEAPU8.buffer, ptr, cells * cells * 4).slice();
   const idp = mod._sm_ids() >> 2;
   const ids = Uint8Array.from(mod.HEAP32.subarray(idp, idp + cells * cells));
 
-  let hs = null;
-  if (relief) {
-    hs = heights(s, x0 - s, z0 - s, cells + 2, cells + 2);
+  if (relief && y == null) {
+    const hs = heights(s, x0 - s, z0 - s, cells + 2, cells + 2);
     if (hs) shade(rgba, hs, cells, s);
   }
 
   const canvas = new OffscreenCanvas(cells, cells);
   canvas.getContext('2d').putImageData(new ImageData(rgba, cells, cells), 0, 0);
-  const bitmap = canvas.transferToImageBitmap();
-
-  const found = [];
-  for (const t of structs) {
-    const n = mod._sm_structures(t, x0, z0, x0 + span - 1, z0 + span - 1);
-    for (const [x, z] of pairs(n)) found.push({ t, x, z });
-  }
 
   let slime = null;
-  if (bpp <= 2) {
+  if (bpp <= 2 && dim === 0) {
     const c = span / 16;
     const sp = mod._sm_slime(x0 / 16, z0 / 16, c, c);
     slime = mod.HEAPU8.slice(sp, sp + c * c);
   }
-  return { bitmap, ids, cells, found, slime };
+  // Cache as PNG (a fraction of the raw size); don't hold up the reply.
+  canvas.convertToBlob({ type: 'image/png' }).then((png) => cachePut(key, { png, ids, cells, slime }));
+  return { bitmap: canvas.transferToImageBitmap(), ids, cells, slime };
+}
+
+// Structure positions of the given types within one tile, per type.
+async function structs({ tx, tz, bpp, types, mc, seed, dim }) {
+  const span = TILE * bpp, x0 = tx * span, z0 = tz * span;
+  const byType = {};
+  for (const t of types) {
+    const key = `s|${CACHE_V}|${mc}|${seed}|${dim}|${t}|${bpp}|${tx}|${tz}`;
+    const hit = await cacheGet(key);
+    if (hit) { byType[t] = hit.found; continue; }
+    const found = [];
+    if (t === END_ISLANDS) {
+      const n = mod._sm_end_islands(x0, z0, x0 + span - 1, z0 + span - 1), o = out();
+      for (let i = 0; i < n; i++) found.push({ t, x: mod.HEAP32[o + i * 3], z: mod.HEAP32[o + i * 3 + 1], r: mod.HEAP32[o + i * 3 + 2] });
+    } else {
+      const n = mod._sm_structures(t, x0, z0, x0 + span - 1, z0 + span - 1);
+      for (const [x, z] of pairs(n)) found.push({ t, x, z });
+      // End cities: note which have a ship (the elytra).
+      if (t === 20) for (const f of found) { mod._sm_variant(20, f.x, f.z); f.ship = mod.HEAP32[out() + 8] === 1; }
+    }
+    byType[t] = found;
+    cachePut(key, { found });
+  }
+  return { byType };
+}
+
+// Variant details for one structure (see sm_variant in api.c).
+function variant({ type, x, z }) {
+  mod._sm_variant(type, x, z);
+  const o = out(), v = [...mod.HEAP32.subarray(o, o + 9)];
+  return { biome: v[0], abandoned: !!v[1], start: v[2], giant: !!v[3], underground: !!v[4], basement: !!v[5], size: v[6], cracked: !!v[7], ship: !!v[8] };
+}
+
+function fortress({ x, z }) {
+  const n = mod._sm_fortress_pieces(x, z), o = out();
+  return { boxes: [...mod.HEAP32.subarray(o, o + n * 4)] };
+}
+
+function locate({ biome, x, z, maxR }) {
+  const ok = mod._sm_locate_biome(biome, Math.round(x), Math.round(z), maxR);
+  return ok ? { x: mod.HEAP32[out()], z: mod.HEAP32[out() + 1] } : { none: true };
 }
 
 // ---------- 3D terrain mesh ----------
@@ -220,16 +326,22 @@ function world({ dim, mc }) {
   }
   // Overworld biomes this version can generate, for the seed finder.
   const overworld = Object.keys(names).map(Number).filter((i) => mod._sm_biome_generates(mc, i));
-  return { spawn, names, overworld };
+  const colors = {};
+  for (const i of Object.keys(names)) { const c = biomeRGB(+i); colors[i] = `rgb(${c[0]},${c[1]},${c[2]})`; }
+  return { spawn, names, overworld, colors };
 }
 
-self.onmessage = ({ data }) => {
+self.onmessage = async ({ data }) => {
   const { id, kind, mc, seed, dim } = data;
   try {
+    if (kind === 'prune') { await prune(); self.postMessage({ id }); return; }
     init(mc, seed, dim);
+    usePalette(data.palette ?? 'classic');
     if (kind === 'tile') {
-      const r = tile(data);
+      const r = await tile(data);
       self.postMessage({ id, ...r }, r ? [r.bitmap] : []);
+    } else if (kind === 'structs') {
+      self.postMessage({ id, ...(await structs(data)) });
     } else if (kind === 'mesh') {
       const r = mesh(data);
       self.postMessage({ id, ...r }, r.pos ? [r.pos.buffer, r.nor.buffer, r.col.buffer, r.index.buffer, r.heights.buffer, r.top.buffer] : []);
@@ -237,6 +349,12 @@ self.onmessage = ({ data }) => {
       self.postMessage({ id, ...world(data) });
     } else if (kind === 'strongholds') {
       self.postMessage({ id, strongholds: pairs(mod._sm_strongholds(128)) });
+    } else if (kind === 'variant') {
+      self.postMessage({ id, ...variant(data) });
+    } else if (kind === 'fortress') {
+      self.postMessage({ id, ...fortress(data) });
+    } else if (kind === 'locate') {
+      self.postMessage({ id, ...locate(data) });
     }
   } catch (e) {
     self.postMessage({ id, error: String(e) });

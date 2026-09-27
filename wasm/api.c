@@ -58,7 +58,7 @@ static void surface(void)
     sn_seed = g_seed; sn_dim = g_dim;
 }
 
-static int out[8192];
+static int out[8192]; // shared result buffer (pairs, triples or quads)
 
 // Viable structure positions of a type within a block rectangle. Returns
 // count; positions are in the static buffer as x,z pairs.
@@ -158,137 +158,6 @@ EMSCRIPTEN_KEEPALIVE float *sm_heights(int scale, int x, int z, int w, int h)
     return hbuf;
 }
 
-// ---------------------------------------------------------------------------
-// Seed finder. Conditions are packed ints: [kind, id, radius] per condition,
-// measured from block 0,0. kind 1 = structure type `id`, kind 2 = biome `id`.
-// Cheap seed-only structure positions are checked first; generators are only
-// seeded for survivors. Matches go to fout as (seed, x, z of first condition).
-
-enum { COND_STRUCT = 1, COND_BIOME = 2, MAX_CAND = 64, MAX_REGIONS = 128 };
-
-static Generator fg_ow, fg_nether, fg_end;
-static int f_mc = -1;
-static int64_t fout_seed[256];
-static int f_done; // seeds processed by the last sm_find call
-static int fout_pos[512];
-
-EMSCRIPTEN_KEEPALIVE int64_t *sm_fout_seed(void) { return fout_seed; }
-EMSCRIPTEN_KEEPALIVE int *sm_fout_pos(void) { return fout_pos; }
-EMSCRIPTEN_KEEPALIVE int sm_fdone(void) { return f_done; }
-
-static int cand_x[8][MAX_CAND], cand_z[8][MAX_CAND], cand_n[8];
-
-static int nearStructures(int ci, int type, int R, uint64_t seed)
-{
-    StructureConfig sc;
-    if (!getStructureConfig(type, f_mc, &sc)) return 0;
-    int rs = sc.regionSize * 16;
-    int r0 = (int)floor((double)-R / rs), r1 = (int)floor((double)R / rs);
-    // Small-grid structures (buried treasure) with a huge radius would scan
-    // millions of regions per seed; cap the square at MAX_REGIONS a side.
-    if (r1 - r0 + 1 > MAX_REGIONS) { r0 = -MAX_REGIONS / 2; r1 = MAX_REGIONS / 2 - 1; }
-    int n = 0;
-    for (int rz = r0; rz <= r1; rz++)
-        for (int rx = r0; rx <= r1; rx++) {
-            Pos p;
-            if (!getStructurePos(type, f_mc, seed, rx, rz, &p)) continue;
-            if ((int64_t)p.x * p.x + (int64_t)p.z * p.z > (int64_t)R * R) continue;
-            if (n < MAX_CAND) { cand_x[ci][n] = p.x; cand_z[ci][n] = p.z; n++; continue; }
-            // Full: keep the nearest MAX_CAND by replacing the farthest.
-            int64_t d = (int64_t)p.x * p.x + (int64_t)p.z * p.z, worst = -1; int wi = 0;
-            for (int i = 0; i < n; i++) {
-                int64_t di = (int64_t)cand_x[ci][i] * cand_x[ci][i] + (int64_t)cand_z[ci][i] * cand_z[ci][i];
-                if (di > worst) { worst = di; wi = i; }
-            }
-            if (d < worst) { cand_x[ci][wi] = p.x; cand_z[ci][wi] = p.z; }
-        }
-    cand_n[ci] = n;
-    return n;
-}
-
-static Generator *seeded(int dim, uint64_t seed, uint8_t *done)
-{
-    int k = dim == DIM_NETHER ? 1 : dim == DIM_END ? 2 : 0;
-    Generator *g = k == 1 ? &fg_nether : k == 2 ? &fg_end : &fg_ow;
-    if (!done[k]) { applySeed(g, dim, seed); done[k] = 1; }
-    return g;
-}
-
-static int viable(int type, Generator *g, int x, int z, uint64_t seed)
-{
-    if (!isViableStructurePos(type, g, x, z, 0)) return 0;
-    if (type == End_City) {
-        SurfaceNoise esn;
-        initSurfaceNoise(&esn, DIM_END, seed);
-        return isViableEndCityTerrain(g, &esn, x, z);
-    }
-    if (f_mc >= MC_1_18 && (type == Desert_Pyramid || type == Jungle_Temple || type == Mansion))
-        return isViableStructureTerrain(type, g, x, z);
-    return 1;
-}
-
-static int hasBiome(Generator *g, int id, int R, int *fx, int *fz)
-{
-    int step = R / 16; if (step < 32) step = 32;
-    // Spiral-ish: rings outward so near hits exit early.
-    for (int ring = 0; ring * step <= R; ring++) {
-        for (int j = -ring; j <= ring; j++)
-            for (int i = -ring; i <= ring; i++) {
-                if (abs(i) != ring && abs(j) != ring) continue;
-                int x = i * step, z = j * step;
-                if ((int64_t)x * x + (int64_t)z * z > (int64_t)R * R) continue;
-                if (getBiomeAt(g, 4, x >> 2, 16, z >> 2) == id) { *fx = x; *fz = z; return 1; }
-            }
-    }
-    return 0;
-}
-
-EMSCRIPTEN_KEEPALIVE int sm_find(int mc, uint64_t start, int count, const int *cond, int n, int maxOut)
-{
-    if (mc != f_mc) {
-        setupGenerator(&fg_ow, mc, 0); setupGenerator(&fg_nether, mc, 0); setupGenerator(&fg_end, mc, 0);
-        f_mc = mc;
-    }
-    if (n > 8) n = 8;
-    int found = 0, k;
-    for (k = 0; k < count && found < maxOut; k++) {
-        uint64_t seed = start + (uint64_t)k;
-        int ok = 1;
-        // Phase 1: structure positions from the seed alone.
-        for (int c = 0; c < n && ok; c++)
-            if (cond[c*3] == COND_STRUCT && !nearStructures(c, cond[c*3+1], cond[c*3+2], seed)) ok = 0;
-        if (!ok) continue;
-
-        // Phase 2: biome/terrain viability, seeding generators only as needed.
-        uint8_t done[3] = {0, 0, 0};
-        int fx = 0, fz = 0;
-        for (int c = 0; c < n && ok; c++) {
-            int kind = cond[c*3], id = cond[c*3+1], R = cond[c*3+2];
-            if (kind == COND_STRUCT) {
-                StructureConfig sc;
-                getStructureConfig(id, mc, &sc);
-                Generator *g = seeded(sc.dim, seed, done);
-                int any = 0;
-                for (int i = 0; i < cand_n[c] && !any; i++)
-                    if (viable(id, g, cand_x[c][i], cand_z[c][i], seed)) {
-                        any = 1;
-                        if (c == 0) { fx = cand_x[c][i]; fz = cand_z[c][i]; }
-                    }
-                ok = any;
-            } else if (kind == COND_BIOME) {
-                int bx, bz;
-                ok = hasBiome(seeded(DIM_OVERWORLD, seed, done), id, R, &bx, &bz);
-                if (ok && c == 0) { fx = bx; fz = bz; }
-            }
-        }
-        if (!ok) continue;
-        fout_seed[found] = (int64_t)seed;
-        fout_pos[found*2] = fx; fout_pos[found*2+1] = fz;
-        found++;
-    }
-    f_done = k;
-    return found;
-}
 EMSCRIPTEN_KEEPALIVE int sm_biome_generates(int mc, int id) { return isOverworld(mc, id); }
 
 // After sm_heights: mapApproxHeight reports the biome at the ground, which under
@@ -311,4 +180,263 @@ EMSCRIPTEN_KEEPALIVE int *sm_surface_biomes(int scale, int x, int z, int w, int 
         }
     free(coarse);
     return ibuf;
+}
+
+// ---------------------------------------------------------------------------
+// Structure details, layouts, End islands, biome search, palette.
+
+// Variant info for a structure at (x, z), written to out[]:
+// [biome, abandoned, start, giant, underground, basement, size, cracked, ship]
+EMSCRIPTEN_KEEPALIVE int sm_variant(int type, int x, int z)
+{
+    StructureVariant sv;
+    memset(&sv, 0, sizeof sv);
+    memset(out, 0, 9 * sizeof(int));
+    int biome = getBiomeAt(&g, 4, (x >> 2) + 2, g_mc >= MC_1_18 ? 319 >> 2 : 0, (z >> 2) + 2);
+    if (getVariant(&sv, type, g_mc, g_seed, x, z, biome)) {
+        out[0] = sv.biome; out[1] = sv.abandoned; out[2] = sv.start; out[3] = sv.giant;
+        out[4] = sv.underground; out[5] = sv.basement; out[6] = sv.size; out[7] = sv.cracked;
+    } else out[0] = -1;
+    if (type == End_City) {
+        static Piece pieces[END_CITY_PIECES_MAX];
+        int n = getEndCityPieces(pieces, g_seed, x >> 4, z >> 4);
+        for (int i = 0; i < n; i++) if (pieces[i].type == END_SHIP) { out[8] = 1; break; }
+    }
+    return 1;
+}
+
+// Fortress piece footprints as (x0, z0, x1, z1) quads in out[]. Returns count.
+EMSCRIPTEN_KEEPALIVE int sm_fortress_pieces(int x, int z)
+{
+    static Piece list[400];
+    int n = getFortressPieces(list, 400, g_mc, g_seed, x >> 4, z >> 4);
+    if (n > 400) n = 400;
+    for (int i = 0; i < n; i++) {
+        out[i*4] = list[i].bb0.x; out[i*4+1] = list[i].bb0.z;
+        out[i*4+2] = list[i].bb1.x; out[i*4+3] = list[i].bb1.z;
+    }
+    return n;
+}
+
+// Small End islands in a block rectangle as (x, z, r) triples. Returns count.
+EMSCRIPTEN_KEEPALIVE int sm_end_islands(int x0, int z0, int x1, int z1)
+{
+    int n = 0;
+    for (int cz = z0 >> 4; cz <= (z1 >> 4); cz++)
+        for (int cx = x0 >> 4; cx <= (x1 >> 4); cx++) {
+            EndIsland is[2];
+            int k = getEndIslands(is, g_mc, g_seed, cx, cz);
+            for (int i = 0; i < k && n < 2700; i++) {
+                out[n*3] = is[i].x; out[n*3+1] = is[i].z; out[n*3+2] = is[i].r; n++;
+            }
+        }
+    return n;
+}
+
+// Nearest block position of biome `id` to (x, z), searching outward in rings
+// up to maxR. Coarser steps further out. Result in out[0..1]; returns 1 if found.
+EMSCRIPTEN_KEEPALIVE int sm_locate_biome(int id, int x, int z, int maxR)
+{
+    int y = g_dim == DIM_END ? 0 : 64 >> 2; // Overworld and Nether biomes vary with height
+    if (getBiomeAt(&g, 4, x >> 2, y, z >> 2) == id) { out[0] = x; out[1] = z; return 1; }
+    for (int r = 16; r <= maxR; ) {
+        int step = r < 1024 ? 16 : r < 4096 ? 32 : 64;
+        // Points on the square ring at distance r, spaced `step` apart.
+        for (int t = -r; t < r; t += step) {
+            int px[4] = { x + t, x + r, x - t, x - r }, pz[4] = { z - r, z + t, z + r, z - t };
+            for (int k = 0; k < 4; k++)
+                if (getBiomeAt(&g, 4, px[k] >> 2, y, pz[k] >> 2) == id) {
+                    out[0] = px[k]; out[1] = pz[k]; return 1;
+                }
+        }
+        r += step;
+    }
+    return 0;
+}
+
+// Override a biome's display colour (used by the map palette).
+EMSCRIPTEN_KEEPALIVE void sm_set_color(int id, int r, int gg, int b)
+{
+    if (!colors_ready) { initBiomeColors(colors); colors_ready = 1; }
+    colors[id & 255][0] = r; colors[id & 255][1] = gg; colors[id & 255][2] = b;
+}
+EMSCRIPTEN_KEEPALIVE void sm_reset_colors(void) { initBiomeColors(colors); colors_ready = 1; }
+
+// ---------------------------------------------------------------------------
+// Seed finder. Conditions are packed ints [kind, id, radius, count, extra]:
+//   1 structure  `id`: at least `count` within `radius`
+//   2 biome      `id`: present within `radius` (extra > 0: covers >= extra %)
+//   3 cluster    `id`: `count` of them within `extra` blocks of each other,
+//                      somewhere within `radius`
+//   4 spawn biome `id`: the world spawn is in this biome (radius ignored)
+// Distances are from block 0,0, or from the (estimated) world spawn when
+// `fromSpawn` is set. Cheap seed-only structure positions are checked first;
+// generators are seeded only for survivors.
+
+enum { C_STRUCT = 1, C_BIOME = 2, C_CLUSTER = 3, C_SPAWN_BIOME = 4, CW = 5,
+       MAX_CAND = 64, MAX_REGIONS = 128, MAX_CONDS = 8, SPAWN_SLACK = 1024 };
+
+static Generator fg_ow, fg_nether, fg_end;
+static int f_mc = -1, f_done;
+static int64_t fout_seed[256];
+static int fout_pos[512];
+static int cand_x[MAX_CONDS][MAX_CAND], cand_z[MAX_CONDS][MAX_CAND], cand_n[MAX_CONDS];
+
+EMSCRIPTEN_KEEPALIVE int64_t *sm_fout_seed(void) { return fout_seed; }
+EMSCRIPTEN_KEEPALIVE int *sm_fout_pos(void) { return fout_pos; }
+EMSCRIPTEN_KEEPALIVE int sm_fdone(void) { return f_done; }
+
+static int64_t d2(int x, int z, int cx, int cz) { int64_t dx = x - cx, dz = z - cz; return dx * dx + dz * dz; }
+
+// Structure attempt positions within R of (cx, cz); keeps the nearest MAX_CAND.
+static int nearStructures(int ci, int type, int R, int cx, int cz, uint64_t seed)
+{
+    StructureConfig sc;
+    if (!getStructureConfig(type, f_mc, &sc)) return 0;
+    int rs = sc.regionSize * 16;
+    int rx0 = (int)floor((double)(cx - R) / rs), rx1 = (int)floor((double)(cx + R) / rs);
+    int rz0 = (int)floor((double)(cz - R) / rs), rz1 = (int)floor((double)(cz + R) / rs);
+    // Small-grid structures with a huge radius would scan millions of regions.
+    if (rx1 - rx0 + 1 > MAX_REGIONS) { int m = (rx0 + rx1) / 2; rx0 = m - MAX_REGIONS / 2; rx1 = m + MAX_REGIONS / 2 - 1; }
+    if (rz1 - rz0 + 1 > MAX_REGIONS) { int m = (rz0 + rz1) / 2; rz0 = m - MAX_REGIONS / 2; rz1 = m + MAX_REGIONS / 2 - 1; }
+    int n = 0;
+    for (int rz = rz0; rz <= rz1; rz++)
+        for (int rx = rx0; rx <= rx1; rx++) {
+            Pos p;
+            if (!getStructurePos(type, f_mc, seed, rx, rz, &p)) continue;
+            int64_t d = d2(p.x, p.z, cx, cz);
+            if (d > (int64_t)R * R) continue;
+            if (n < MAX_CAND) { cand_x[ci][n] = p.x; cand_z[ci][n] = p.z; n++; continue; }
+            int64_t worst = -1; int wi = 0;
+            for (int i = 0; i < n; i++) {
+                int64_t di = d2(cand_x[ci][i], cand_z[ci][i], cx, cz);
+                if (di > worst) { worst = di; wi = i; }
+            }
+            if (d < worst) { cand_x[ci][wi] = p.x; cand_z[ci][wi] = p.z; }
+        }
+    cand_n[ci] = n;
+    return n;
+}
+
+static Generator *seeded(int dim, uint64_t seed, uint8_t *done)
+{
+    int k = dim == DIM_NETHER ? 1 : dim == DIM_END ? 2 : 0;
+    Generator *gen = k == 1 ? &fg_nether : k == 2 ? &fg_end : &fg_ow;
+    if (!done[k]) { applySeed(gen, dim, seed); done[k] = 1; }
+    return gen;
+}
+
+static int viable(int type, Generator *gen, int x, int z, uint64_t seed)
+{
+    if (!isViableStructurePos(type, gen, x, z, 0)) return 0;
+    if (type == End_City) {
+        SurfaceNoise esn;
+        initSurfaceNoise(&esn, DIM_END, seed);
+        return isViableEndCityTerrain(gen, &esn, x, z);
+    }
+    if (f_mc >= MC_1_18 && (type == Desert_Pyramid || type == Jungle_Temple || type == Mansion))
+        return isViableStructureTerrain(type, gen, x, z);
+    return 1;
+}
+
+// Biome `id` within R of (cx, cz). minPct == 0: any sample (nearest ring first);
+// otherwise at least minPct % of samples. First hit goes to (fx, fz).
+static int biomeCheck(Generator *gen, int id, int R, int cx, int cz, int minPct, int *fx, int *fz)
+{
+    int step = R / 16; if (step < 32) step = 32;
+    int total = 0, hits = 0;
+    for (int ring = 0; ring * step <= R; ring++)
+        for (int j = -ring; j <= ring; j++)
+            for (int i = -ring; i <= ring; i++) {
+                if (abs(i) != ring && abs(j) != ring) continue;
+                int x = cx + i * step, z = cz + j * step;
+                if (d2(x, z, cx, cz) > (int64_t)R * R) continue;
+                total++;
+                if (getBiomeAt(gen, 4, x >> 2, 16, z >> 2) != id) continue;
+                if (!hits) { *fx = x; *fz = z; }
+                hits++;
+                if (minPct == 0) return 1;
+            }
+    return minPct > 0 && total > 0 && hits * 100 >= minPct * total;
+}
+
+EMSCRIPTEN_KEEPALIVE int sm_find(int mc, uint64_t start, int count, const int *cond, int n, int fromSpawn, int maxOut)
+{
+    if (mc != f_mc) {
+        setupGenerator(&fg_ow, mc, 0); setupGenerator(&fg_nether, mc, 0); setupGenerator(&fg_end, mc, 0);
+        f_mc = mc;
+    }
+    if (n > MAX_CONDS) n = MAX_CONDS;
+    int found = 0, k;
+    for (k = 0; k < count && found < maxOut; k++) {
+        uint64_t seed = start + (uint64_t)k;
+        int ok = 1;
+
+        // Phase 1: structure positions from the seed alone. Around spawn we
+        // don't know the centre yet, so look a bit wider and refine later.
+        int slack = fromSpawn ? SPAWN_SLACK : 0;
+        for (int c = 0; c < n && ok; c++) {
+            const int *q = cond + c * CW;
+            if (q[0] == C_STRUCT || q[0] == C_CLUSTER) {
+                int need = q[3] < 1 ? 1 : q[3];
+                if (nearStructures(c, q[1], q[2] + slack, 0, 0, seed) < need) ok = 0;
+            }
+        }
+        if (!ok) continue;
+
+        uint8_t done[3] = {0, 0, 0};
+        int cx = 0, cz = 0;
+        if (fromSpawn) {
+            Pos sp = estimateSpawn(seeded(DIM_OVERWORLD, seed, done), NULL);
+            cx = sp.x; cz = sp.z;
+        }
+
+        // Phase 2: biome/terrain checks, seeding generators only as needed.
+        int fx = cx, fz = cz;
+        for (int c = 0; c < n && ok; c++) {
+            const int *q = cond + c * CW;
+            int kind = q[0], id = q[1], R = q[2], need = q[3] < 1 ? 1 : q[3], extra = q[4];
+            if (kind == C_STRUCT || kind == C_CLUSTER) {
+                StructureConfig sc;
+                getStructureConfig(id, mc, &sc);
+                Generator *gen = seeded(sc.dim, seed, done);
+                int vx[MAX_CAND], vz[MAX_CAND], nv = 0;
+                for (int i = 0; i < cand_n[c]; i++) {
+                    int x = cand_x[c][i], z = cand_z[c][i];
+                    if (d2(x, z, cx, cz) > (int64_t)R * R) continue;
+                    if (!viable(id, gen, x, z, seed)) continue;
+                    vx[nv] = x; vz[nv] = z; nv++;
+                    if (kind == C_STRUCT && nv >= need) break;
+                }
+                if (kind == C_STRUCT) {
+                    ok = nv >= need;
+                    if (ok && c == 0) { fx = vx[0]; fz = vz[0]; }
+                } else {
+                    // Some structure with need-1 others within `extra` blocks.
+                    ok = 0;
+                    for (int i = 0; i < nv && !ok; i++) {
+                        int near = 1;
+                        for (int j = 0; j < nv; j++)
+                            if (j != i && d2(vx[i], vz[i], vx[j], vz[j]) <= (int64_t)extra * extra) near++;
+                        if (near >= need) { ok = 1; if (c == 0) { fx = vx[i]; fz = vz[i]; } }
+                    }
+                }
+            } else if (kind == C_BIOME) {
+                int bx, bz;
+                ok = biomeCheck(seeded(DIM_OVERWORLD, seed, done), id, R, cx, cz, extra, &bx, &bz);
+                if (ok && c == 0) { fx = bx; fz = bz; }
+            } else if (kind == C_SPAWN_BIOME) {
+                Generator *gen = seeded(DIM_OVERWORLD, seed, done);
+                if (!fromSpawn) { Pos sp = estimateSpawn(gen, NULL); cx = sp.x; cz = sp.z; }
+                ok = getBiomeAt(gen, 4, cx >> 2, 16, cz >> 2) == id;
+                if (ok && c == 0) { fx = cx; fz = cz; }
+            }
+        }
+        if (!ok) continue;
+        fout_seed[found] = (int64_t)seed;
+        fout_pos[found*2] = fx; fout_pos[found*2+1] = fz;
+        found++;
+    }
+    f_done = k;
+    return found;
 }
