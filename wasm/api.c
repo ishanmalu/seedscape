@@ -109,3 +109,34 @@ EMSCRIPTEN_KEEPALIVE unsigned char *sm_slime(int cx, int cz, int w, int h)
 EMSCRIPTEN_KEEPALIVE int sm_str2mc(const char *s) { return str2mc(s); }
 EMSCRIPTEN_KEEPALIVE int *sm_ids(void) { return cache; }
 EMSCRIPTEN_KEEPALIVE unsigned char *sm_color(int id) { return colors[id & 255]; }
+
+// Approximate surface height (blocks) for a w*h grid of cells, each `scale`
+// blocks apart, starting at block (x, z). Overworld only.
+static SurfaceNoise sn;
+static uint64_t sn_seed = ~0ULL;
+static float *hbuf;
+static int *ibuf;
+static size_t hcap;
+
+EMSCRIPTEN_KEEPALIVE int *sm_hids(void) { return ibuf; }
+
+EMSCRIPTEN_KEEPALIVE float *sm_heights(int scale, int x, int z, int w, int h)
+{
+    if (g_dim != DIM_OVERWORLD || g_mc < MC_1_18) return 0;
+    if (sn_seed != g_seed) { initSurfaceNoise(&sn, DIM_OVERWORLD, g_seed); sn_seed = g_seed; }
+    if ((size_t)w * h > hcap) {
+        free(hbuf); free(ibuf); hcap = (size_t)w * h;
+        hbuf = malloc(hcap * sizeof(float)); ibuf = malloc(hcap * sizeof(int));
+    }
+    if (scale == 4) {
+        if (mapApproxHeight(hbuf, ibuf, &g, &sn, x >> 2, z >> 2, w, h)) return 0;
+        return hbuf;
+    }
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++) {
+            float y;
+            if (mapApproxHeight(&y, 0, &g, &sn, (x + i * scale) >> 2, (z + j * scale) >> 2, 1, 1)) return 0;
+            hbuf[j * w + i] = y;
+        }
+    return hbuf;
+}

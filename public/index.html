@@ -4,83 +4,97 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Seedmap</title>
-  <meta name="description" content="Every Minecraft seed layer on one fast map: biomes, structures, strongholds, slime chunks.">
+  <meta name="description" content="Every Minecraft seed layer on one fast map, in 2D relief or 3D.">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
-  <aside id="panel">
-    <header>
-      <h1>Seedmap</h1>
-      <button id="toggle-panel" class="icon" aria-label="Toggle panel">☰</button>
-    </header>
-
-    <div class="body">
-      <label class="field">
-        <span>Seed</span>
-        <div class="row">
-          <input id="seed" autocomplete="off" spellcheck="false" placeholder="Number or text">
-          <button id="random" class="icon" title="Random seed" aria-label="Random seed">⚄</button>
-        </div>
-      </label>
-
-      <div class="row two">
-        <label class="field">
-          <span>Version</span>
-          <select id="version">
-            <option value="28">1.21.4+</option>
-            <option value="27">1.21.2 – 1.21.3</option>
-            <option value="26">1.21 – 1.21.1</option>
-            <option value="25">1.20</option>
-            <option value="24">1.19.3 – 1.19.4</option>
-            <option value="23">1.19 – 1.19.2</option>
-            <option value="22">1.18</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Dimension</span>
-          <select id="dim">
-            <option value="0">Overworld</option>
-            <option value="-1">Nether</option>
-            <option value="1">End</option>
-          </select>
-        </label>
-      </div>
-
-      <form id="goto" class="field">
-        <span>Go to</span>
-        <div class="row">
-          <input id="goto-x" inputmode="numeric" placeholder="X">
-          <input id="goto-z" inputmode="numeric" placeholder="Z">
-          <button type="submit">Go</button>
-        </div>
-      </form>
-
-      <section>
-        <h2>Layers</h2>
-        <div id="layers"></div>
-      </section>
-
-      <section>
-        <h2>Nearest to centre</h2>
-        <ol id="nearby"></ol>
-      </section>
-    </div>
-  </aside>
-
   <main id="map">
     <canvas id="canvas"></canvas>
+    <div id="view3d" hidden></div>
     <div id="tooltip" hidden></div>
-    <div id="status">
-      <span id="coords">0, 0</span>
-      <span id="biome"></span>
-      <span id="busy" hidden>Generating…</span>
-    </div>
-    <div id="zoom">
-      <button id="zoom-in" aria-label="Zoom in">+</button>
-      <button id="zoom-out" aria-label="Zoom out">−</button>
-      <button id="share" title="Copy link">Share</button>
-    </div>
   </main>
+
+  <!-- Top-left: identity + seed -->
+  <section class="glass" id="seedbar">
+    <div class="brand"><span class="logo"></span>Seedmap</div>
+    <div class="seed">
+      <input id="seed" autocomplete="off" spellcheck="false" placeholder="Seed — number or text" aria-label="Seed">
+      <button id="random" class="ghost" title="Random seed" aria-label="Random seed">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg>
+      </button>
+    </div>
+    <div class="chips">
+      <select id="version" aria-label="Version">
+        <option value="28">1.21.4+</option>
+        <option value="27">1.21.2–3</option>
+        <option value="26">1.21–1.21.1</option>
+        <option value="25">1.20</option>
+        <option value="24">1.19.3–4</option>
+        <option value="23">1.19–1.19.2</option>
+        <option value="22">1.18</option>
+      </select>
+      <div class="seg" id="dims" role="radiogroup" aria-label="Dimension">
+        <button data-dim="0" class="on">Overworld</button>
+        <button data-dim="-1">Nether</button>
+        <button data-dim="1">End</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Left: layers -->
+  <section class="glass" id="layers-card">
+    <button class="card-head" id="layers-toggle">
+      <span>Layers</span>
+      <svg class="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="card-body" id="layers"></div>
+  </section>
+
+  <!-- Top-right: view mode + share -->
+  <section class="glass" id="modebar">
+    <div class="seg" id="modes" role="radiogroup" aria-label="View">
+      <button data-mode="map">Map</button>
+      <button data-mode="relief" class="on">Relief</button>
+      <button data-mode="3d">3D</button>
+    </div>
+    <button id="share" class="primary">Share</button>
+  </section>
+
+  <!-- Right: nearby -->
+  <section class="glass" id="nearby-card">
+    <div class="card-head static"><span>Nearby</span></div>
+    <form id="goto">
+      <input id="goto-x" inputmode="numeric" placeholder="X" aria-label="X">
+      <input id="goto-z" inputmode="numeric" placeholder="Z" aria-label="Z">
+      <button type="submit" class="ghost">Go</button>
+    </form>
+    <ol id="nearby"></ol>
+  </section>
+
+  <!-- Bottom -->
+  <div class="glass pill" id="status">
+    <span id="coords">0, 0</span>
+    <span class="dot"></span>
+    <span id="biome">—</span>
+    <span id="busy" hidden><i class="spinner"></i></span>
+  </div>
+  <div class="glass" id="zoom">
+    <button id="zoom-in" class="ghost" aria-label="Zoom in">+</button>
+    <button id="zoom-out" class="ghost" aria-label="Zoom out">−</button>
+  </div>
+  <div class="glass pill" id="hint3d" hidden>Drag to orbit · scroll to zoom · 900 × 900 blocks around the centre</div>
 
   <script type="module" src="app.js"></script>
 </body>
