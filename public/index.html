@@ -180,6 +180,32 @@
   <div class="glass pill" id="readout" hidden></div>
   <div class="glass pill" id="hint3d" hidden></div>
 
+  <!-- Start screen: shown when the site is opened without a link -->
+  <div id="welcome" hidden>
+    <form class="welcome-card glass" id="welcome-form" autocomplete="off">
+      <div class="brand"><span class="logo"></span>Seedscape</div>
+      <h1>Add your seed</h1>
+      <p class="sub">Paste a Minecraft seed to explore its biomes, structures and terrain. In Minecraft, type <code>/seed</code> to see yours.</p>
+      <div class="welcome-row">
+        <input id="welcome-seed" autofocus placeholder="Paste your seed" aria-label="Seed" spellcheck="false" inputmode="text">
+        <button type="button" id="welcome-paste" class="ghost">Paste</button>
+      </div>
+      <div class="welcome-row">
+        <select id="welcome-version" aria-label="Version"></select>
+        <button type="submit" class="primary" id="welcome-go">Explore</button>
+      </div>
+      <p class="hint" id="welcome-hint" role="status"></p>
+      <div class="welcome-alt">
+        <button type="button" class="link" id="welcome-last" hidden></button>
+        <button type="button" class="link" id="welcome-random">Try a random seed</button>
+      </div>
+      <div id="welcome-saved" hidden>
+        <div class="saved-head">Your saved seeds</div>
+        <div class="chips-list" id="welcome-saved-list"></div>
+      </div>
+    </form>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -81,8 +81,9 @@ server, no account and no ads.
 - **Saved seeds:** press ☆ next to the seed to save it with its exact view,
   then click the seed box to reopen, rename or remove saved seeds (also in
   ⌘K). They're kept in your browser; no account needed.
-- **Continues where you left off:** opening the site without a link brings
-  back your last seed and view. Press the shuffle button for a random seed.
+- **Start screen:** opening the site without a link asks for your seed
+  (paste it, pick a version, Explore), with one-click *Continue* for your
+  last seed, your saved seeds, or a random seed. Shared links skip it.
 - **Links hold everything:** seed, version, dimension, view, position, zoom,
   layers, biome height, palette, 3D size and pins.
 - **Save PNG** of the current view, or a **4K poster**, with a caption.

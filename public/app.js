@@ -902,16 +902,17 @@ function toast(text) {
 // ---------- controls ----------
 $('seed').addEventListener('change', (e) => { setSeedText(e.target.value); hideSaved(); regenerate(); });
 $('random').onclick = () => { setSeedText(randomSeed()); regenerate(); };
-$('version').onchange = (e) => {
-  const v = e.target.value;
+// `v` is a Java version id, or 'bedrock'. Caller regenerates.
+function setVersion(v) {
+  $('version').value = v;
   settings.edition = v === 'bedrock' ? 'bedrock' : 'java';
   // Bedrock biomes match the newest Java version's for the same seed.
   settings.mc = v === 'bedrock' ? 28 : +v;
   finder.stop();
   $('open-finder').disabled = bedrock();
   buildLayers();
-  regenerate();
-};
+}
+$('version').onchange = (e) => { setVersion(e.target.value); regenerate(); };
 function setDim(next) {
   const prev = settings.dim;
   if (next === prev) return;
@@ -1132,6 +1133,65 @@ $('seed').addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideSav
 document.addEventListener('mousedown', (e) => {
   if (!$('saved-menu').hidden && !$('seedbar').contains(e.target)) hideSaved();
 });
+
+// ---------- start screen ----------
+function showWelcome(hasLast) {
+  const box = $('welcome'), input = $('welcome-seed'), hint = $('welcome-hint');
+  $('welcome-version').innerHTML = $('version').innerHTML;
+  $('welcome-version').value = $('version').value;
+  const close = () => {
+    box.hidden = true;
+    document.body.classList.remove('welcoming');
+  };
+  const lastBtn = $('welcome-last');
+  lastBtn.hidden = !hasLast;
+  if (hasLast) {
+    lastBtn.textContent = `Continue with ${settings.seedText || signed(settings.seed)} →`;
+    lastBtn.onclick = close;
+  }
+  const saved = savedSeeds();
+  $('welcome-saved').hidden = !saved.length;
+  $('welcome-saved-list').replaceChildren(...saved.slice(0, 12).map((x) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: x.name, title: `${x.seed} · ${x.version}` });
+    b.onclick = () => { close(); openHash(x.hash); };
+    return b;
+  }));
+  const start = (seedText) => {
+    setVersion($('welcome-version').value);
+    setSeedText(seedText);
+    view.x = 0; view.z = 0; view.ppb = 0.25;
+    settings.dim = 0;
+    if (settings.mode === '3d') setMode('relief');
+    syncSegs(); buildLayers();
+    close();
+    regenerate();
+  };
+  $('welcome-form').onsubmit = (e) => {
+    e.preventDefault();
+    const v = input.value.trim();
+    if (!v) {
+      hint.textContent = 'Paste or type a seed first (numbers or text).';
+      input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake');
+      input.focus();
+      return;
+    }
+    start(v);
+  };
+  input.oninput = () => (hint.textContent = '');
+  $('welcome-random').onclick = () => start(randomSeed());
+  $('welcome-paste').onclick = async () => {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) { input.value = text.slice(0, 64); hint.textContent = ''; } else hint.textContent = 'Your clipboard is empty.';
+    } catch { hint.textContent = 'Press ⌘V (or Ctrl+V) in the box to paste.'; }
+    input.focus();
+  };
+  box.onkeydown = (e) => { if (e.key === 'Escape' && hasLast) close(); };
+  document.body.classList.add('welcoming');
+  box.hidden = false;
+  input.focus();
+  setTimeout(() => { if (!box.hidden && document.activeElement !== input) input.focus(); }, 60);
+}
 
 // ---------- tools ----------
 const tools = createTools({ dim: () => settings.dim, addWaypoint, draw, status: toast });
@@ -1427,11 +1487,11 @@ if (matchMedia('(max-width: 760px)').matches) {
   $('layers-card').classList.add('collapsed');
   $('layers-toggle').setAttribute('aria-expanded', 'false');
 }
-// Opened without a link: continue where this browser left off.
-if (!location.hash.slice(1) && !EMBEDDED) {
-  const last = lastView();
-  if (typeof last === 'string' && last) history.replaceState(null, '', '#' + last);
-}
+// Opened without a link: show the start screen, with this browser's last view
+// (if any) loaded behind it so "Continue" is instant.
+const openedBare = !location.hash.slice(1) && !EMBEDDED;
+const last = openedBare ? lastView() : null;
+if (typeof last === 'string' && last) history.replaceState(null, '', '#' + last);
 loadHash();
 setupEmbed();
 syncSegs();
@@ -1442,6 +1502,7 @@ syncSizes();
 renderWaypoints();
 resize();
 regenerate();
+if (openedBare) showWelcome(typeof last === 'string' && last);
 
 // Offline support and instant repeat loads (skipped in local development).
 if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname))
