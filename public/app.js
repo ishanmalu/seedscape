@@ -1149,6 +1149,8 @@ document.addEventListener('mousedown', (e) => {
 });
 
 // ---------- start screen ----------
+// Never let the form do a real submit (a page reload), even before it's set up.
+$('welcome-form').addEventListener('submit', (e) => e.preventDefault());
 function showWelcome(hasLast) {
   const box = $('welcome'), input = $('welcome-seed'), hint = $('welcome-hint');
   $('welcome-version').innerHTML = $('version').innerHTML;
@@ -1180,8 +1182,7 @@ function showWelcome(hasLast) {
     close();
     regenerate();
   };
-  $('welcome-form').onsubmit = (e) => {
-    e.preventDefault();
+  $('welcome-form').onsubmit = () => {
     const v = input.value.trim();
     if (!v) {
       hint.textContent = 'Paste or type a seed first (numbers or text).';
