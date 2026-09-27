@@ -2,6 +2,7 @@
 import { svg, badge, badgeEvents, esc } from './icons.js';
 import { initFinder } from './finder-ui.js';
 import { parseSeed, signed, randomSeed } from './seed.js';
+import { lastView, rememberView, savedSeeds, saveSeed, removeSeed, renameSeed } from './saved.js';
 import { NATURAL } from './palette.js';
 import { createTools } from './tools.js';
 import { initCommands } from './commands.js';
@@ -599,6 +600,8 @@ function saveHash() {
   if (waypoints.length)
     p.set('w', waypoints.map((w) => [w.dim, w.x, w.z, encodeURIComponent(w.name)].join(',')).join('|'));
   history.replaceState(null, '', '#' + p);
+  if (!settings.embed) rememberView(p.toString());
+  syncSaveButton();
 }
 function loadHash() {
   const p = new URLSearchParams(location.hash.slice(1));
@@ -897,7 +900,7 @@ function toast(text) {
 }
 
 // ---------- controls ----------
-$('seed').addEventListener('change', (e) => { setSeedText(e.target.value); regenerate(); });
+$('seed').addEventListener('change', (e) => { setSeedText(e.target.value); hideSaved(); regenerate(); });
 $('random').onclick = () => { setSeedText(randomSeed()); regenerate(); };
 $('version').onchange = (e) => {
   const v = e.target.value;
@@ -1063,6 +1066,71 @@ canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const [x, z] = toWorld(e.offsetX, e.offsetY);
   addWaypoint(x, z);
+});
+
+// ---------- saved seeds ----------
+const seedId = () => `${bedrock() ? 'b' : settings.mc}:${settings.seedText || signed(settings.seed)}`;
+const VERSION_NAME = () => (bedrock() ? 'Bedrock' : $('version').selectedOptions[0]?.text ?? '');
+function syncSaveButton() {
+  const saved = savedSeeds().some((x) => x.id === seedId());
+  const b = $('save-seed');
+  b.innerHTML = svg(saved ? 'starFill' : 'star', 17);
+  b.classList.toggle('on', saved);
+  b.setAttribute('aria-pressed', saved);
+  b.title = saved ? 'Saved (click to remove)' : 'Save this seed';
+}
+$('save-seed').onclick = () => {
+  const id = seedId();
+  if (savedSeeds().some((x) => x.id === id)) { removeSeed(id); toast('Removed from saved seeds.'); }
+  else {
+    saveSeed({ id, name: settings.seedText || signed(settings.seed), seed: settings.seedText || signed(settings.seed), version: VERSION_NAME(), hash: location.hash.slice(1), saved: Date.now() });
+    toast('Saved. Click the seed box to see your saved seeds.');
+  }
+  syncSaveButton();
+  renderSaved();
+};
+// Reopen a saved view (or any link state) without reloading the page.
+function openHash(hash) {
+  const was = settings.mode;
+  history.replaceState(null, '', '#' + hash);
+  loadHash();
+  syncSegs(); buildLayers(); buildViewOptions(); syncSizes(); renderWaypoints();
+  $('open-finder').disabled = bedrock();
+  if (was === '3d' && settings.mode !== '3d') setMode(settings.mode);
+  regenerate();
+}
+function renderSaved() {
+  const list = savedSeeds();
+  $('saved-list').replaceChildren(...(list.length ? list.map((x) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<button class="open"><b></b><small></small></button>
+      <button class="icon-btn" data-a="rename" aria-label="Rename">${svg('edit', 13)}</button>
+      <button class="icon-btn" data-a="del" aria-label="Remove">${svg('close', 13)}</button>`;
+    li.querySelector('b').textContent = x.name;
+    li.querySelector('small').textContent = `${x.seed} · ${x.version}`;
+    li.querySelector('.open').onmousedown = (e) => { e.preventDefault(); hideSaved(); openHash(x.hash); };
+    li.querySelector('[data-a=del]').onmousedown = (e) => { e.preventDefault(); removeSeed(x.id); renderSaved(); syncSaveButton(); };
+    li.querySelector('[data-a=rename]').onmousedown = (e) => {
+      e.preventDefault();
+      const input = Object.assign(document.createElement('input'), { value: x.name, maxLength: 40 });
+      input.setAttribute('aria-label', 'Name');
+      li.querySelector('.open').replaceWith(input);
+      input.focus(); input.select();
+      const done = () => { renameSeed(x.id, input.value.trim() || x.name); renderSaved(); };
+      input.onblur = done;
+      input.onkeydown = (k) => { if (k.key === 'Enter') input.blur(); if (k.key === 'Escape') { input.value = x.name; input.blur(); } };
+    };
+    return li;
+  }) : [Object.assign(document.createElement('li'), { className: 'empty', textContent: 'No saved seeds yet. Press ☆ to save one.' })]));
+}
+function hideSaved() { $('saved-menu').hidden = true; }
+$('seed').addEventListener('focus', () => { renderSaved(); $('saved-menu').hidden = false; });
+$('seed').addEventListener('blur', () => setTimeout(() => {
+  if (!$('saved-menu').contains(document.activeElement)) hideSaved();
+}, 120));
+$('seed').addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideSaved(); e.target.blur(); } });
+document.addEventListener('mousedown', (e) => {
+  if (!$('saved-menu').hidden && !$('seedbar').contains(e.target)) hideSaved();
 });
 
 // ---------- tools ----------
@@ -1274,6 +1342,9 @@ initCommands({
       cmd('Biomes at surface', 'layers', () => { settings.y = null; buildViewOptions(); viewChanged(); }, 'height'),
       cmd('Biomes underground (y −40)', 'layers', () => { settings.y = -40; buildViewOptions(); viewChanged(); }, 'height deep dark caves'),
     ];
+    for (const x of savedSeeds())
+      list.push(cmd(`Open saved: ${x.name}`, 'starFill', () => openHash(x.hash), `saved seed ${x.seed}`));
+    list.push(cmd('Save this seed', 'star', () => $('save-seed').click(), 'bookmark favourite'));
     for (const st of STRUCTS.filter((x) => x.dim === settings.dim)) {
       const k = `s${st.id}`;
       list.push(cmd(`${on.has(k) ? 'Hide' : 'Show'} ${st.name}`, st.icon, () => toggleLayer(k), 'layer toggle'));
@@ -1355,6 +1426,11 @@ new ResizeObserver(resize).observe(canvas);
 if (matchMedia('(max-width: 760px)').matches) {
   $('layers-card').classList.add('collapsed');
   $('layers-toggle').setAttribute('aria-expanded', 'false');
+}
+// Opened without a link: continue where this browser left off.
+if (!location.hash.slice(1) && !EMBEDDED) {
+  const last = lastView();
+  if (typeof last === 'string' && last) history.replaceState(null, '', '#' + last);
 }
 loadHash();
 setupEmbed();

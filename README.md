@@ -78,6 +78,11 @@ server, no account and no ads.
   Seedscape JSON or Xaero's Minimap files.
 
 ### Sharing
+- **Saved seeds:** press ☆ next to the seed to save it with its exact view,
+  then click the seed box to reopen, rename or remove saved seeds (also in
+  ⌘K). They're kept in your browser; no account needed.
+- **Continues where you left off:** opening the site without a link brings
+  back your last seed and view. Press the shuffle button for a random seed.
 - **Links hold everything:** seed, version, dimension, view, position, zoom,
   layers, biome height, palette, 3D size and pins.
 - **Save PNG** of the current view, or a **4K poster**, with a caption.
@@ -123,8 +128,8 @@ server, no account and no ads.
 
 ## Privacy
 
-- **Local:** everything runs locally in your browser, and the generated
-  tiles stay on your device.
+- **Local:** everything runs locally in your browser. Generated tiles,
+  saved seeds and your last view stay on your device.
 - **Analytics:** page views are counted with Vercel Web Analytics, which
   uses no cookies, and only on the live site.
 - **No third-party requests:** fonts and libraries are served by the site
@@ -155,6 +160,7 @@ force-pushes and deletion.
 | `public/commands.js` | ⌘K command palette |
 | `public/waypoints-io.js` | Pin import/export (JSON, Xaero) |
 | `public/palette.js`, `seed.js`, `icons.js` | Colour palettes, seed parsing, original SVG icons |
+| `public/saved.js` | Saved seeds and last view (localStorage) |
 | `public/compare.html` | Side-by-side seed comparison |
 | `public/sw.js` | Offline support |
 | `scripts/og.*` | Regenerates the social preview image |

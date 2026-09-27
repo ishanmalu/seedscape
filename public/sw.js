@@ -7,7 +7,7 @@ const CORE = ['./', 'style.css', 'app.js', 'icons.js', 'finder-ui.js', 'view3d.j
   'worker.js', 'finder.js', 'cubiomes.mjs', 'cubiomes.wasm',
   'vendor/three/three.module.min.js', 'vendor/three/OrbitControls.js', 'palette.js', 'tools.js',
   'fonts/inter-latin.woff2', 'fonts/jetbrains-mono-500-latin.woff2', 'waypoints-io.js', 'commands.js',
-  'seed.js'];
+  'seed.js', 'saved.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));

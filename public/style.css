@@ -475,3 +475,19 @@ header .credit { margin-left: 4px; }
   #toast { bottom: 176px; }
   #readout { bottom: 176px; }
 }
+
+/* ---------- saved seeds ---------- */
+#seedbar, #layers-card { width: 360px; }
+#seedbar { position: fixed; }
+#save-seed.on { color: #f5c46a; }
+#saved-menu { left: 14px; right: 14px; top: auto; width: auto; margin-top: 6px; position: absolute; z-index: 9; max-height: 320px; overflow-y: auto; }
+.saved-head { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+#saved-list { list-style: none; margin: 0; padding: 0; }
+#saved-list li { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border-radius: 9px; }
+#saved-list li:hover { background: rgba(255, 255, 255, .06); }
+#saved-list .open { flex: 1; min-width: 0; text-align: left; padding: 3px 0; }
+#saved-list .open b { display: block; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#saved-list .open small { color: var(--muted); font: 500 11px "JetBrains Mono", monospace; }
+#saved-list input { flex: 1; padding: 4px 8px; font-size: 13px; }
+#saved-list .empty { color: var(--muted); font-size: 12.5px; padding: 6px 10px 10px; }
+@media (max-width: 760px) { #seedbar, #layers-card { width: auto; } }
