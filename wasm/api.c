@@ -152,8 +152,150 @@ EMSCRIPTEN_KEEPALIVE float *sm_heights(int scale, int x, int z, int w, int h)
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++) {
             float y;
-            if (mapApproxHeight(&y, 0, &g, &sn, (x + i * scale) >> 2, (z + j * scale) >> 2, 1, 1)) return 0;
+            if (mapApproxHeight(&y, &ibuf[j * w + i], &g, &sn, (x + i * scale) >> 2, (z + j * scale) >> 2, 1, 1)) return 0;
             hbuf[j * w + i] = y;
         }
     return hbuf;
+}
+
+// ---------------------------------------------------------------------------
+// Seed finder. Conditions are packed ints: [kind, id, radius] per condition,
+// measured from block 0,0. kind 1 = structure type `id`, kind 2 = biome `id`.
+// Cheap seed-only structure positions are checked first; generators are only
+// seeded for survivors. Matches go to fout as (seed, x, z of first condition).
+
+enum { COND_STRUCT = 1, COND_BIOME = 2, MAX_CAND = 16 };
+
+static Generator fg_ow, fg_nether, fg_end;
+static int f_mc = -1;
+static int64_t fout_seed[256];
+static int fout_pos[512];
+
+EMSCRIPTEN_KEEPALIVE int64_t *sm_fout_seed(void) { return fout_seed; }
+EMSCRIPTEN_KEEPALIVE int *sm_fout_pos(void) { return fout_pos; }
+
+static int cand_x[8][MAX_CAND], cand_z[8][MAX_CAND], cand_n[8];
+
+static int nearStructures(int ci, int type, int R, uint64_t seed)
+{
+    StructureConfig sc;
+    if (!getStructureConfig(type, f_mc, &sc)) return 0;
+    int rs = sc.regionSize * 16;
+    int r0 = (int)floor((double)-R / rs), r1 = (int)floor((double)R / rs);
+    int n = 0;
+    for (int rz = r0; rz <= r1; rz++)
+        for (int rx = r0; rx <= r1; rx++) {
+            Pos p;
+            if (!getStructurePos(type, f_mc, seed, rx, rz, &p)) continue;
+            if ((int64_t)p.x * p.x + (int64_t)p.z * p.z > (int64_t)R * R) continue;
+            if (n < MAX_CAND) { cand_x[ci][n] = p.x; cand_z[ci][n] = p.z; n++; }
+        }
+    cand_n[ci] = n;
+    return n;
+}
+
+static Generator *seeded(int dim, uint64_t seed, uint8_t *done)
+{
+    int k = dim == DIM_NETHER ? 1 : dim == DIM_END ? 2 : 0;
+    Generator *g = k == 1 ? &fg_nether : k == 2 ? &fg_end : &fg_ow;
+    if (!done[k]) { applySeed(g, dim, seed); done[k] = 1; }
+    return g;
+}
+
+static int viable(int type, Generator *g, int x, int z, uint64_t seed)
+{
+    if (!isViableStructurePos(type, g, x, z, 0)) return 0;
+    if (type == End_City) {
+        SurfaceNoise esn;
+        initSurfaceNoise(&esn, DIM_END, seed);
+        return isViableEndCityTerrain(g, &esn, x, z);
+    }
+    if (f_mc >= MC_1_18 && (type == Desert_Pyramid || type == Jungle_Temple || type == Mansion))
+        return isViableStructureTerrain(type, g, x, z);
+    return 1;
+}
+
+static int hasBiome(Generator *g, int id, int R, int *fx, int *fz)
+{
+    int step = R / 16; if (step < 32) step = 32;
+    // Spiral-ish: rings outward so near hits exit early.
+    for (int ring = 0; ring * step <= R; ring++) {
+        for (int j = -ring; j <= ring; j++)
+            for (int i = -ring; i <= ring; i++) {
+                if (abs(i) != ring && abs(j) != ring) continue;
+                int x = i * step, z = j * step;
+                if ((int64_t)x * x + (int64_t)z * z > (int64_t)R * R) continue;
+                if (getBiomeAt(g, 4, x >> 2, 16, z >> 2) == id) { *fx = x; *fz = z; return 1; }
+            }
+    }
+    return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int sm_find(int mc, uint64_t start, int count, const int *cond, int n, int maxOut)
+{
+    if (mc != f_mc) {
+        setupGenerator(&fg_ow, mc, 0); setupGenerator(&fg_nether, mc, 0); setupGenerator(&fg_end, mc, 0);
+        f_mc = mc;
+    }
+    if (n > 8) n = 8;
+    int found = 0;
+    for (int k = 0; k < count && found < maxOut; k++) {
+        uint64_t seed = start + (uint64_t)k;
+        int ok = 1;
+        // Phase 1: structure positions from the seed alone.
+        for (int c = 0; c < n && ok; c++)
+            if (cond[c*3] == COND_STRUCT && !nearStructures(c, cond[c*3+1], cond[c*3+2], seed)) ok = 0;
+        if (!ok) continue;
+
+        // Phase 2: biome/terrain viability, seeding generators only as needed.
+        uint8_t done[3] = {0, 0, 0};
+        int fx = 0, fz = 0;
+        for (int c = 0; c < n && ok; c++) {
+            int kind = cond[c*3], id = cond[c*3+1], R = cond[c*3+2];
+            if (kind == COND_STRUCT) {
+                StructureConfig sc;
+                getStructureConfig(id, mc, &sc);
+                Generator *g = seeded(sc.dim, seed, done);
+                int any = 0;
+                for (int i = 0; i < cand_n[c] && !any; i++)
+                    if (viable(id, g, cand_x[c][i], cand_z[c][i], seed)) {
+                        any = 1;
+                        if (c == 0) { fx = cand_x[c][i]; fz = cand_z[c][i]; }
+                    }
+                ok = any;
+            } else if (kind == COND_BIOME) {
+                int bx, bz;
+                ok = hasBiome(seeded(DIM_OVERWORLD, seed, done), id, R, &bx, &bz);
+                if (ok && c == 0) { fx = bx; fz = bz; }
+            }
+        }
+        if (!ok) continue;
+        fout_seed[found] = (int64_t)seed;
+        fout_pos[found*2] = fx; fout_pos[found*2+1] = fz;
+        found++;
+    }
+    return found;
+}
+EMSCRIPTEN_KEEPALIVE int sm_biome_generates(int mc, int id) { return isOverworld(mc, id); }
+
+// After sm_heights: mapApproxHeight reports the biome at the ground, which under
+// water is often a cave biome. Swap in the biome at sea level for submerged
+// cells. Ocean biomes are large, so sample them on a 4x coarser grid.
+EMSCRIPTEN_KEEPALIVE int *sm_surface_biomes(int scale, int x, int z, int w, int h)
+{
+    int cw = (w + 3) / 4, ch = (h + 3) / 4;
+    int *coarse = malloc(sizeof(int) * cw * ch);
+    for (int k = 0; k < cw * ch; k++) coarse[k] = -1;
+    for (int j = 0; j < h; j++)
+        for (int i = 0; i < w; i++) {
+            if (hbuf[j * w + i] >= 63) continue;
+            int *c = &coarse[(j / 4) * cw + i / 4];
+            if (*c < 0) {
+                int si = (i / 4) * 4 + 2, sj = (j / 4) * 4 + 2;
+                *c = getBiomeAt(&g, 4, (x + si * scale) >> 2, 63 >> 2, (z + sj * scale) >> 2);
+            }
+            ibuf[j * w + i] = *c;
+        }
+    free(coarse);
+    return ibuf;
 }

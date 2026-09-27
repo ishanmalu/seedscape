@@ -70,6 +70,7 @@
       <button role="radio" data-mode="relief" class="on">Relief</button>
       <button role="radio" data-mode="3d">3D</button>
     </div>
+    <button id="open-finder" class="ghost with-icon" aria-expanded="false" aria-controls="finder">Find seeds</button>
     <button id="share" class="primary">Share</button>
   </section>
 
@@ -80,8 +81,30 @@
       <input id="goto-x" inputmode="numeric" placeholder="X" aria-label="X">
       <input id="goto-z" inputmode="numeric" placeholder="Z" aria-label="Z">
       <button type="submit" class="ghost">Go</button>
+      <button type="button" id="add-pin" class="ghost" title="Pin these coordinates" aria-label="Pin these coordinates"></button>
     </form>
+    <ol id="waypoints" aria-label="Waypoints"></ol>
     <ol id="nearby"></ol>
+  </section>
+
+  <!-- Right: seed finder (replaces Nearby while open) -->
+  <section class="glass" id="finder" hidden>
+    <div class="card-head static">
+      <span>Seed finder</span>
+      <button id="close-finder" class="icon-btn" aria-label="Close finder"></button>
+    </div>
+    <div class="finder-body">
+      <p class="lede">Seeds where every condition is within range of 0, 0.</p>
+      <div id="conds"></div>
+      <button id="add-cond" class="ghost add-cond"></button>
+      <label class="start">
+        <span>Start from</span>
+        <input id="find-start" autocomplete="off" spellcheck="false" placeholder="Random">
+      </label>
+      <button id="find-run" class="primary run">Search</button>
+      <div id="find-stats" aria-live="polite"></div>
+      <ol id="find-results"></ol>
+    </div>
   </section>
 
   <!-- Bottom -->
@@ -95,6 +118,15 @@
     <button id="zoom-in" class="ghost" aria-label="Zoom in">+</button>
     <button id="zoom-out" class="ghost" aria-label="Zoom out">−</button>
   </div>
+  <div class="glass" id="toolbar3d" hidden>
+    <div class="seg" id="sizes" role="radiogroup" aria-label="3D area">
+      <button role="radio" data-s="4">800</button>
+      <button role="radio" data-s="8">1.6k</button>
+      <button role="radio" data-s="16">3.2k</button>
+    </div>
+    <button id="coords-toggle" class="ghost with-icon on" aria-pressed="true">Coordinates</button>
+  </div>
+  <div class="glass pill" id="readout" hidden></div>
   <div class="glass pill" id="hint3d" hidden></div>
 
   <script type="module" src="app.js"></script>

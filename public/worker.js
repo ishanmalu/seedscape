@@ -104,27 +104,112 @@ function tile({ tx, tz, bpp, structs, relief }) {
   return { bitmap, ids, cells, found, slime };
 }
 
-// A square of terrain for the 3D view: heights and biome colours, 4 blocks per cell.
-function terrain({ x, z, n, structs }) {
-  const x0 = Math.floor((x - n * 2) / 4) * 4, z0 = Math.floor((z - n * 2) / 4) * 4;
-  const hs = heights(4, x0, z0, n, n);
-  if (!hs) return { error: 'Heights are only available in the Overworld on 1.18+.' };
-  const ip = mod._sm_hids() >> 2;
-  const ids = mod.HEAP32.slice(ip, ip + n * n);
-  const colors = new Uint8Array(n * n * 3);
-  for (let i = 0; i < n * n; i++) {
-    const c = mod._sm_color(ids[i]);
-    colors[i * 3] = mod.HEAPU8[c]; colors[i * 3 + 1] = mod.HEAPU8[c + 1]; colors[i * 3 + 2] = mod.HEAPU8[c + 2];
+// ---------- 3D terrain mesh ----------
+// A square of n*n cells, `s` blocks each, centred on (x, z). Only visible faces
+// are emitted: every top, plus cliff sides where a neighbour is lower.
+// 1 unit = 1 cell horizontally; heights are exaggerated a little.
+const exaggeration = (s) => 1.35 * Math.sqrt(s / 4);
+
+function biomeRGB(id) {
+  const c = mod._sm_color(id);
+  return [mod.HEAPU8[c], mod.HEAPU8[c + 1], mod.HEAPU8[c + 2]];
+}
+const hash = (i, j) => { let h = (i * 374761393 + j * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) & 255) / 255; };
+
+function mesh({ x, z, n, s, structs }) {
+  const x0 = Math.floor((x - (n * s) / 2) / s) * s, z0 = Math.floor((z - (n * s) / 2) / s) * s;
+  const hs = heights(s, x0, z0, n, n);
+  if (!hs) return { error: '3D terrain is only available in the Overworld on 1.18+.' };
+  const ip = mod._sm_surface_biomes(s, x0, z0, n, n) >> 2;
+  const ids = Uint8Array.from(mod.HEAP32.subarray(ip, ip + n * n));
+
+  const E = exaggeration(s);
+  const Y = (h) => (Math.round(h) / s) * E;
+  let minY = Infinity;
+  const top = new Float32Array(n * n);
+  for (let k = 0; k < n * n; k++) { top[k] = Y(hs[k]); if (top[k] < minY) minY = top[k]; }
+  const base = minY - 4;
+  const seaY = Y(SEA - 1) + (0.5 / s) * E;
+
+  const MAXQ = n * n * 5 + n * 4;
+  const pos = new Float32Array(MAXQ * 12), nor = new Int8Array(MAXQ * 12), col = new Uint8Array(MAXQ * 12);
+  let q = 0;
+  const idx = [];
+  // Quad a-b-c-d, counter-clockwise seen from outside; lo/hi colours per edge.
+  function quad(v, nx, ny, nz, c1, c2) {
+    const o = q * 4;
+    for (let k = 0; k < 4; k++) {
+      pos.set(v[k], (o + k) * 3);
+      nor[(o + k) * 3] = nx * 127; nor[(o + k) * 3 + 1] = ny * 127; nor[(o + k) * 3 + 2] = nz * 127;
+      col.set(k < 2 ? c1 : c2, (o + k) * 3);
+    }
+    q++;
   }
+  const off = n / 2;
+  const tint = (c, f) => [Math.min(255, c[0] * f), Math.min(255, c[1] * f), Math.min(255, c[2] * f)];
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const SAND = [150, 140, 108], STONE = [118, 118, 124], DIRT = [112, 86, 60], SNOW = [244, 247, 251];
+
+  for (let j = 0; j < n; j++)
+    for (let i = 0; i < n; i++) {
+      const k = j * n + i, h = hs[k], t = top[k];
+      let c = biomeRGB(ids[k]);
+      const lum = 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+      c = mix(c, [lum, lum, lum], 0.12);
+      if (h < SEA - 1) c = tint(mix(c, SAND, 0.6), 0.85);
+      else if (h > 150) c = mix(c, SNOW, Math.min(1, (h - 150) / 25));
+      c = tint(c, 0.94 + hash(i + x0, j + z0) * 0.12);
+      const xa = i - off, xb = xa + 1, za = j - off, zb = za + 1;
+      quad([[xa, t, za], [xa, t, zb], [xb, t, zb], [xb, t, za]], 0, 1, 0, c, c);
+
+      const side = mix(c, h > 100 ? STONE : DIRT, 0.55), hi = tint(side, 0.8);
+      const nb = (ii, jj) => (ii < 0 || jj < 0 || ii >= n || jj >= n ? base : top[jj * n + ii]);
+      const face = (lo, verts, nx, nz) => {
+        if (lo >= t) return;
+        const loC = tint(side, 0.8 * (0.45 + 0.55 * Math.min(1, (t - lo) > 3 ? 0 : 1 - (t - lo) / 3)));
+        quad(verts(lo), nx, 0, nz, loC, hi);
+      };
+      face(nb(i + 1, j), (lo) => [[xb, lo, zb], [xb, lo, za], [xb, t, za], [xb, t, zb]], 1, 0);
+      face(nb(i - 1, j), (lo) => [[xa, lo, za], [xa, lo, zb], [xa, t, zb], [xa, t, za]], -1, 0);
+      face(nb(i, j + 1), (lo) => [[xa, lo, zb], [xb, lo, zb], [xb, t, zb], [xa, t, zb]], 0, 1);
+      face(nb(i, j - 1), (lo) => [[xb, lo, za], [xa, lo, za], [xa, t, za], [xb, t, za]], 0, -1);
+    }
+  const landQuads = q;
+
+  // Water: a surface over every submerged cell, plus walls on the outer edge.
+  const W = [34, 96, 178], Wd = [16, 44, 96];
+  for (let j = 0; j < n; j++)
+    for (let i = 0; i < n; i++) {
+      const t = top[j * n + i];
+      if (t >= seaY) continue;
+      const xa = i - off, xb = xa + 1, za = j - off, zb = za + 1;
+      quad([[xa, seaY, za], [xa, seaY, zb], [xb, seaY, zb], [xb, seaY, za]], 0, 1, 0, W, W);
+      if (i === n - 1) quad([[xb, t, zb], [xb, t, za], [xb, seaY, za], [xb, seaY, zb]], 1, 0, 0, Wd, W);
+      if (i === 0) quad([[xa, t, za], [xa, t, zb], [xa, seaY, zb], [xa, seaY, za]], -1, 0, 0, Wd, W);
+      if (j === n - 1) quad([[xa, t, zb], [xb, t, zb], [xb, seaY, zb], [xa, seaY, zb]], 0, 0, 1, Wd, W);
+      if (j === 0) quad([[xb, t, za], [xa, t, za], [xa, seaY, za], [xb, seaY, za]], 0, 0, -1, Wd, W);
+    }
+
+  const index = new Uint32Array(q * 6);
+  for (let k = 0; k < q; k++) {
+    const o = k * 4;
+    index.set([o, o + 1, o + 2, o, o + 2, o + 3], k * 6);
+  }
+
   const found = [];
   for (const t of structs) {
-    const c = mod._sm_structures(t, x0, z0, x0 + n * 4 - 1, z0 + n * 4 - 1);
+    const c = mod._sm_structures(t, x0, z0, x0 + n * s - 1, z0 + n * s - 1);
     for (const [px, pz] of pairs(c)) found.push({ t, x: px, z: pz });
   }
-  return { x0, z0, n, heights: hs, ids: Uint8Array.from(ids), colors, found };
+  return {
+    x0, z0, n, s, base, seaY, E,
+    pos: pos.slice(0, q * 12), nor: nor.slice(0, q * 12), col: col.slice(0, q * 12), index,
+    landIndexCount: landQuads * 6,
+    heights: hs, ids, top, found,
+  };
 }
 
-function world({ dim }) {
+function world({ dim, mc }) {
   let spawn = null;
   if (dim === 0) { mod._sm_spawn(); spawn = pairs(1)[0]; }
   const names = {};
@@ -132,7 +217,9 @@ function world({ dim }) {
     const name = mod.UTF8ToString(mod._sm_biome_name(i));
     if (name && name !== '?') names[i] = name;
   }
-  return { spawn, names };
+  // Overworld biomes this version can generate, for the seed finder.
+  const overworld = Object.keys(names).map(Number).filter((i) => mod._sm_biome_generates(mc, i));
+  return { spawn, names, overworld };
 }
 
 self.onmessage = ({ data }) => {
@@ -142,9 +229,9 @@ self.onmessage = ({ data }) => {
     if (kind === 'tile') {
       const r = tile(data);
       self.postMessage({ id, ...r }, r ? [r.bitmap] : []);
-    } else if (kind === 'terrain') {
-      const r = terrain(data);
-      self.postMessage({ id, ...r }, r.heights ? [r.heights.buffer, r.colors.buffer] : []);
+    } else if (kind === 'mesh') {
+      const r = mesh(data);
+      self.postMessage({ id, ...r }, r.pos ? [r.pos.buffer, r.nor.buffer, r.col.buffer, r.index.buffer, r.heights.buffer, r.top.buffer] : []);
     } else if (kind === 'world') {
       self.postMessage({ id, ...world(data) });
     } else if (kind === 'strongholds') {
