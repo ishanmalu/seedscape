@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Compare seeds · Seedscape</title>
+  <meta name="description" content="Two Minecraft seeds side by side, panning and zooming together.">
+  <meta name="theme-color" content="#0b0d12">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { display: flex; flex-direction: column; }
+    header {
+      position: relative; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 14px; background: var(--glass-strong); border-bottom: 1px solid var(--stroke);
+    }
+    header .brand { margin: 0 8px 0 0; }
+    header a.brand { color: var(--text); text-decoration: none; }
+    header label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+    header input { width: 210px; font: 500 13px "JetBrains Mono", monospace; }
+    header .vs { color: var(--muted); font-weight: 600; }
+    header .spacer { flex: 1; }
+    .maps { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--stroke); min-height: 0; }
+    iframe { width: 100%; height: 100%; border: 0; background: var(--bg); display: block; }
+    .tag {
+      position: absolute; z-index: 4; top: 64px; padding: 5px 10px; border-radius: 999px;
+      background: var(--glass-strong); border: 1px solid var(--stroke); font-size: 12px; font-weight: 600;
+    }
+    .tag.a { left: calc(25% - 14px); } .tag.b { left: calc(75% - 14px); }
+    @media (max-width: 760px) {
+      .maps { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+      header input { width: 150px; }
+      .tag { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="./"><span class="logo"></span>Seedscape</a>
+    <label>A <input id="a" spellcheck="false" autocomplete="off" aria-label="Seed A"></label>
+    <span class="vs">vs</span>
+    <label>B <input id="b" spellcheck="false" autocomplete="off" aria-label="Seed B"></label>
+    <button id="swap" class="ghost">Swap</button>
+    <span class="spacer"></span>
+    <span class="lede" style="margin:0">Pan or zoom either map; the other follows.</span>
+  </header>
+  <span class="tag a">A</span><span class="tag b">B</span>
+  <div class="maps">
+    <iframe id="fa" title="Seed A map"></iframe>
+    <iframe id="fb" title="Seed B map"></iframe>
+  </div>
+  <script type="module">
+    // Two embedded maps kept in step: each reports its view, we pass it to the other.
+    const $ = (id) => document.getElementById(id);
+    const p = new URLSearchParams(location.hash.slice(1));
+    const num = (k, d) => (p.has(k) && Number.isFinite(+p.get(k)) ? +p.get(k) : d);
+    const state = {
+      a: p.get('a') ?? '12345', b: p.get('b') ?? '67890',
+      v: num('v', 28), d: [-1, 0, 1].includes(num('d', 0)) ? num('d', 0) : 0,
+      x: num('x', 0), z: num('z', 0), zoom: num('zoom', -2),
+    };
+    const src = (seed) => './#' + new URLSearchParams({
+      seed, v: state.v, d: state.d, m: 'relief', x: Math.round(state.x), z: Math.round(state.z), zoom: state.zoom, embed: 1, sync: 1,
+    });
+    function save() {
+      history.replaceState(null, '', '#' + new URLSearchParams({ ...state, x: Math.round(state.x), z: Math.round(state.z) }));
+    }
+    function load() {
+      $('a').value = state.a; $('b').value = state.b;
+      $('fa').src = src(state.a); $('fb').src = src(state.b);
+      save();
+    }
+    $('a').onchange = (e) => { state.a = e.target.value.trim() || state.a; load(); };
+    $('b').onchange = (e) => { state.b = e.target.value.trim() || state.b; load(); };
+    $('swap').onclick = () => { [state.a, state.b] = [state.b, state.a]; load(); };
+
+    window.addEventListener('message', (e) => {
+      const d = e.data;
+      if (e.origin !== location.origin || d?.type !== 'seedscape:view') return;
+      const from = e.source === $('fa').contentWindow ? 'fa' : e.source === $('fb').contentWindow ? 'fb' : null;
+      if (!from) return;
+      state.x = d.x; state.z = d.z; state.zoom = +Math.log2(d.ppb).toFixed(2);
+      const other = $(from === 'fa' ? 'fb' : 'fa').contentWindow;
+      other.postMessage({ type: 'seedscape:set-view', x: d.x, z: d.z, ppb: d.ppb }, location.origin);
+      clearTimeout(save.t);
+      save.t = setTimeout(save, 300);
+    });
+    load();
+  </script>
+</body>
+</html>

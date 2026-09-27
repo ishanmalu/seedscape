@@ -13,9 +13,12 @@ Web Workers. There is no backend and no JS build step.
 - `wasm/api.c`: every C function the site calls (`sm_*`). Rebuild with
   `./build.sh` after changing it or `vendor/cubiomes`; commit the regenerated
   `public/cubiomes.mjs` and `public/cubiomes.wasm`.
-- `public/`: the deployed site. `worker.js` (tiles, meshes), `finder.js`
-  (seed search), `app.js` (map UI and URL state), `view3d.js` (three.js, lazy
-  loaded), `icons.js` (original SVG icons), `sw.js` (offline cache).
+- `public/`: the deployed site. `worker.js` (tiles, structures, meshes, with
+  an IndexedDB cache), `finder.js` + `finder-ui.js` (seed search), `app.js`
+  (map UI and URL state), `view3d.js` (three.js, lazy loaded), `tools.js`,
+  `commands.js`, `waypoints-io.js`, `palette.js`, `seed.js`, `icons.js`
+  (original SVG icons), `compare.html`, `sw.js` (offline cache; add new files
+  to its CORE list).
 - `vendor/cubiomes`: upstream cubiomes, vendored; don't edit in place.
 - `public/vendor/three`: three.js r170, vendored; keep versions in sync
   with the import map in `index.html`.
@@ -25,6 +28,7 @@ Web Workers. There is no backend and no JS build step.
 ```sh
 npx serve public      # local dev server
 ./build.sh            # rebuild WebAssembly (brew install emscripten)
+node --test tests/*.test.mjs
 vercel deploy --prod  # deploy (pushes to main also deploy via Vercel's GitHub integration)
 ```
 
@@ -41,7 +45,8 @@ vercel deploy --prod  # deploy (pushes to main also deploy via Vercel's GitHub i
 
 ## Checking changes
 
-There is no test suite. Verify in a browser: map loads with no console
-errors, structures appear, the finder returns results that match the map,
-and 3D builds. For C changes, a quick Node script importing
-`public/cubiomes.mjs` is the fastest way to check results and timings.
+Run `node --test tests/*.test.mjs` (CI runs it on every push). Then verify
+in a browser: map loads with no console errors, structures appear, the finder
+returns results that match the map, and 3D builds. When tile output changes
+(colours, shading, sampling), bump `CACHE_V` in `worker.js` so cached tiles
+are regenerated.
