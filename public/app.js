@@ -1156,6 +1156,10 @@ async function renderImage(W) {
   const cx = Math.round(view.x), cz = Math.round(view.z);
   g.fillText(`Seed ${settings.seedText || signed(settings.seed)}  ·  ${edition}  ·  ${DIM_LABEL[settings.dim]}  ·  centre ${cx}, ${cz}`,
     CAPTION * 0.5 + g.measureText('Seedscape').width + CAPTION * 0.6, H + CAPTION / 2);
+  g.textAlign = 'right';
+  g.fillStyle = '#8d95a3';
+  g.fillText('Built by Ishan Malu · github.com/ishanmalu', W - CAPTION * 0.5, H + CAPTION / 2);
+  g.textAlign = 'left';
   return out;
 }
 async function saveImage(W, label) {

@@ -75,6 +75,13 @@ Page views are counted with Vercel Web Analytics (no cookies) on the live site o
 Not an official Minecraft product. Not approved by or associated with Mojang
 or Microsoft.
 
+## Support
+
+Seedscape is free and has no ads. If it helps you, you can
+[buy me a coffee](https://buymeacoffee.com/ishanmalu).
+
+Built by [Ishan Malu](https://github.com/ishanmalu).
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
