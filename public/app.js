@@ -622,8 +622,7 @@ function setMode(mode) {
   request();
   draw();
 }
-// three.js loads from a CDN, so load it only when 3D is opened: a blocked CDN
-// then breaks 3D alone, not the whole site.
+// three.js is ~700 KB, so load it only when 3D is first opened.
 let view3dLoading = null;
 async function load3D() {
   if (view3d) return view3d;
@@ -661,7 +660,7 @@ async function enter3D({ keepCamera = false } = {}) {
   catch (e) {
     view3dLoading = null;
     if (req === terrainReq) $('hint3d').textContent = /WebGL/i.test(e.message)
-      ? '3D needs WebGL, which this browser has turned off.' : 'Couldn’t load the 3D engine. Check your connection.';
+      ? '3D needs WebGL, which this browser has turned off.' : 'Couldn’t load the 3D engine. Try reloading the page.';
     return;
   }
   if (req !== terrainReq || settings.mode !== '3d') return;

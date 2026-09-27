@@ -1,8 +1,11 @@
-// Offline + instant repeat visits: serve cached files immediately and refresh
-// them in the background (stale-while-revalidate). Bump VERSION to drop old caches.
-const VERSION = 'seedscape-v1';
+// Offline support. Site files are network-first (so a deploy is never mixed
+// with stale files) with the cache as the offline fallback; fonts are
+// cache-first because their URLs never change. Bump VERSION to drop old caches.
+const VERSION = 'seedscape-v2';
 const CORE = ['./', 'index.html', 'style.css', 'app.js', 'icons.js', 'finder-ui.js', 'view3d.js',
-  'worker.js', 'finder.js', 'cubiomes.mjs', 'cubiomes.wasm'];
+  'worker.js', 'finder.js', 'cubiomes.mjs', 'cubiomes.wasm',
+  'vendor/three/three.module.min.js', 'vendor/three/OrbitControls.js'];
+const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
@@ -13,16 +16,27 @@ self.addEventListener('activate', (e) => {
     .then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  const cacheable = e.request.method === 'GET' &&
-    (url.origin === location.origin || url.hostname === 'cdn.jsdelivr.net' || url.hostname.endsWith('gstatic.com') || url.hostname === 'fonts.googleapis.com');
-  if (!cacheable) return;
-  e.respondWith(caches.open(VERSION).then(async (cache) => {
-    const hit = await cache.match(e.request, { ignoreSearch: url.origin === location.origin });
-    const fresh = fetch(e.request).then((res) => {
-      if (res.ok || res.type === 'opaque') cache.put(e.request, res.clone());
-      return res;
-    }).catch(() => hit);
-    return hit ?? fresh;
-  }));
+  if (url.origin === location.origin) e.respondWith(networkFirst(e.request));
+  else if (FONT_HOSTS.includes(url.hostname)) e.respondWith(cacheFirst(e.request));
 });
+
+async function networkFirst(req) {
+  const cache = await caches.open(VERSION);
+  try {
+    const res = await fetch(req);
+    if (res.ok) cache.put(req, res.clone());
+    return res;
+  } catch {
+    return (await cache.match(req, { ignoreSearch: true })) ?? Response.error();
+  }
+}
+async function cacheFirst(req) {
+  const cache = await caches.open(VERSION);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok || res.type === 'opaque') cache.put(req, res.clone());
+  return res;
+}

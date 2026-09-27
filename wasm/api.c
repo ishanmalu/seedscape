@@ -164,15 +164,17 @@ EMSCRIPTEN_KEEPALIVE float *sm_heights(int scale, int x, int z, int w, int h)
 // Cheap seed-only structure positions are checked first; generators are only
 // seeded for survivors. Matches go to fout as (seed, x, z of first condition).
 
-enum { COND_STRUCT = 1, COND_BIOME = 2, MAX_CAND = 16 };
+enum { COND_STRUCT = 1, COND_BIOME = 2, MAX_CAND = 64, MAX_REGIONS = 128 };
 
 static Generator fg_ow, fg_nether, fg_end;
 static int f_mc = -1;
 static int64_t fout_seed[256];
+static int f_done; // seeds processed by the last sm_find call
 static int fout_pos[512];
 
 EMSCRIPTEN_KEEPALIVE int64_t *sm_fout_seed(void) { return fout_seed; }
 EMSCRIPTEN_KEEPALIVE int *sm_fout_pos(void) { return fout_pos; }
+EMSCRIPTEN_KEEPALIVE int sm_fdone(void) { return f_done; }
 
 static int cand_x[8][MAX_CAND], cand_z[8][MAX_CAND], cand_n[8];
 
@@ -182,13 +184,23 @@ static int nearStructures(int ci, int type, int R, uint64_t seed)
     if (!getStructureConfig(type, f_mc, &sc)) return 0;
     int rs = sc.regionSize * 16;
     int r0 = (int)floor((double)-R / rs), r1 = (int)floor((double)R / rs);
+    // Small-grid structures (buried treasure) with a huge radius would scan
+    // millions of regions per seed; cap the square at MAX_REGIONS a side.
+    if (r1 - r0 + 1 > MAX_REGIONS) { r0 = -MAX_REGIONS / 2; r1 = MAX_REGIONS / 2 - 1; }
     int n = 0;
     for (int rz = r0; rz <= r1; rz++)
         for (int rx = r0; rx <= r1; rx++) {
             Pos p;
             if (!getStructurePos(type, f_mc, seed, rx, rz, &p)) continue;
             if ((int64_t)p.x * p.x + (int64_t)p.z * p.z > (int64_t)R * R) continue;
-            if (n < MAX_CAND) { cand_x[ci][n] = p.x; cand_z[ci][n] = p.z; n++; }
+            if (n < MAX_CAND) { cand_x[ci][n] = p.x; cand_z[ci][n] = p.z; n++; continue; }
+            // Full: keep the nearest MAX_CAND by replacing the farthest.
+            int64_t d = (int64_t)p.x * p.x + (int64_t)p.z * p.z, worst = -1; int wi = 0;
+            for (int i = 0; i < n; i++) {
+                int64_t di = (int64_t)cand_x[ci][i] * cand_x[ci][i] + (int64_t)cand_z[ci][i] * cand_z[ci][i];
+                if (di > worst) { worst = di; wi = i; }
+            }
+            if (d < worst) { cand_x[ci][wi] = p.x; cand_z[ci][wi] = p.z; }
         }
     cand_n[ci] = n;
     return n;
@@ -238,8 +250,8 @@ EMSCRIPTEN_KEEPALIVE int sm_find(int mc, uint64_t start, int count, const int *c
         f_mc = mc;
     }
     if (n > 8) n = 8;
-    int found = 0;
-    for (int k = 0; k < count && found < maxOut; k++) {
+    int found = 0, k;
+    for (k = 0; k < count && found < maxOut; k++) {
         uint64_t seed = start + (uint64_t)k;
         int ok = 1;
         // Phase 1: structure positions from the seed alone.
@@ -274,6 +286,7 @@ EMSCRIPTEN_KEEPALIVE int sm_find(int mc, uint64_t start, int count, const int *c
         fout_pos[found*2] = fx; fout_pos[found*2+1] = fz;
         found++;
     }
+    f_done = k;
     return found;
 }
 EMSCRIPTEN_KEEPALIVE int sm_biome_generates(int mc, int id) { return isOverworld(mc, id); }

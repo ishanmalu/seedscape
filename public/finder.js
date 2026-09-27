@@ -20,11 +20,12 @@ self.onmessage = ({ data: { mc, conds, start, stride, block } }) => {
       // This worker owns seeds [base, base + block), then jumps by stride.
       const n = Math.min(size, block - Number(base % BigInt(block)));
       const hits = mod._sm_find(mc, base, n, cp, conds.length, 256);
+      const done = mod._sm_fdone(); // < n if the result buffer filled up
       const sp = mod._sm_fout_seed() >> 3, pp = mod._sm_fout_pos() >> 2;
       for (let i = 0; i < hits; i++)
         found.push({ seed: BigInt.asIntN(64, mod.HEAP64[sp + i]).toString(), x: mod.HEAP32[pp + i * 2], z: mod.HEAP32[pp + i * 2 + 1] });
-      checked += n;
-      base = BigInt.asUintN(64, base + BigInt(n));
+      checked += done;
+      base = BigInt.asUintN(64, base + BigInt(done));
       if (base % BigInt(block) === 0n) base = BigInt.asUintN(64, base + BigInt(stride - block));
     }
     // Aim each inner call at ~1/4 of the batch window.

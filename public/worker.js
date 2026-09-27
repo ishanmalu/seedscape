@@ -134,7 +134,6 @@ function mesh({ x, z, n, s, structs }) {
   const MAXQ = n * n * 5 + n * 4;
   const pos = new Float32Array(MAXQ * 12), nor = new Int8Array(MAXQ * 12), col = new Uint8Array(MAXQ * 12);
   let q = 0;
-  const idx = [];
   // Quad a-b-c-d, counter-clockwise seen from outside; lo/hi colours per edge.
   function quad(v, nx, ny, nz, c1, c2) {
     const o = q * 4;
@@ -166,7 +165,9 @@ function mesh({ x, z, n, s, structs }) {
       const nb = (ii, jj) => (ii < 0 || jj < 0 || ii >= n || jj >= n ? base : top[jj * n + ii]);
       const face = (lo, verts, nx, nz) => {
         if (lo >= t) return;
-        const loC = tint(side, 0.8 * (0.45 + 0.55 * Math.min(1, (t - lo) > 3 ? 0 : 1 - (t - lo) / 3)));
+        // Darker at the foot of tall cliffs, a cheap stand-in for ambient occlusion.
+        const drop = t - lo, ao = drop > 3 ? 0.45 : 0.45 + 0.55 * (1 - drop / 3);
+        const loC = tint(side, 0.8 * ao);
         quad(verts(lo), nx, 0, nz, loC, hi);
       };
       face(nb(i + 1, j), (lo) => [[xb, lo, zb], [xb, lo, za], [xb, t, za], [xb, t, zb]], 1, 0);

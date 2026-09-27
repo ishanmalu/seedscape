@@ -43,12 +43,12 @@ export function initFinder({ structs, biomes, mc, parseSeed, randomSeed, open, p
         <button class="icon-btn" aria-label="Remove condition"${conds.length === 1 ? ' disabled' : ''}>${svg('close', 14)}</button>
         <div class="within">within
           <input type="range" min="50" max="3000" step="50" value="${c.radius}" aria-label="Radius">
-          <input type="number" min="16" max="30000" step="16" value="${c.radius}" aria-label="Radius in blocks"> blocks
+          <input type="number" min="16" max="10000" step="16" value="${c.radius}" aria-label="Radius in blocks"> blocks
         </div>`;
       const [sel, del] = [row.querySelector('select'), row.querySelector('button')];
       const [range, num] = row.querySelectorAll('input');
       sel.onchange = () => { c.key = sel.value; stop(); };
-      const setR = (v) => { c.radius = Math.max(16, Math.min(30000, Math.round(+v) || 16)); range.value = c.radius; num.value = c.radius; stop(); };
+      const setR = (v) => { c.radius = Math.max(16, Math.min(10000, Math.round(+v) || 16)); range.value = c.radius; num.value = c.radius; stop(); };
       range.oninput = () => setR(range.value);
       num.onchange = () => setR(num.value);
       del.onclick = () => { conds.splice(i, 1); stop(); renderConds(); };
