@@ -47,6 +47,17 @@ EMSCRIPTEN_KEEPALIVE unsigned char *sm_biomes(int scale, int x, int z, int w, in
 EMSCRIPTEN_KEEPALIVE int sm_biome_at(int x, int y, int z) { return getBiomeAt(&g, 1, x, y, z); }
 EMSCRIPTEN_KEEPALIVE const char *sm_biome_name(int id) { return biome2str(g_mc, id); }
 
+// Surface noise for the current seed and dimension, built on first use.
+static SurfaceNoise sn;
+static uint64_t sn_seed = ~0ULL;
+static int sn_dim = DIM_UNDEF;
+static void surface(void)
+{
+    if (sn_seed == g_seed && sn_dim == g_dim) return;
+    initSurfaceNoise(&sn, g_dim, g_seed);
+    sn_seed = g_seed; sn_dim = g_dim;
+}
+
 static int out[8192];
 
 // Viable structure positions of a type within a block rectangle. Returns
@@ -67,6 +78,14 @@ EMSCRIPTEN_KEEPALIVE int sm_structures(int type, int x0, int z0, int x1, int z1)
         if (!getStructurePos(type, g_mc, g_seed, rx, rz, &p)) continue;
         if (p.x < x0 || p.x > x1 || p.z < z0 || p.z > z1) continue;
         if (!isViableStructurePos(type, &g, p.x, p.z, 0)) continue;
+        // Biomes alone overshoot these; cubiomes has extra terrain checks.
+        if (type == End_City) {
+            surface();
+            if (!isViableEndCityTerrain(&g, &sn, p.x, p.z)) continue;
+        } else if (g_mc >= MC_1_18 && g_dim == DIM_OVERWORLD &&
+                   (type == Desert_Pyramid || type == Jungle_Temple || type == Mansion)) {
+            if (!isViableStructureTerrain(type, &g, p.x, p.z)) continue;
+        }
         if (n >= 4096) return n;
         out[n*2] = p.x; out[n*2+1] = p.z; n++;
     }
@@ -112,8 +131,6 @@ EMSCRIPTEN_KEEPALIVE unsigned char *sm_color(int id) { return colors[id & 255]; 
 
 // Approximate surface height (blocks) for a w*h grid of cells, each `scale`
 // blocks apart, starting at block (x, z). Overworld only.
-static SurfaceNoise sn;
-static uint64_t sn_seed = ~0ULL;
 static float *hbuf;
 static int *ibuf;
 static size_t hcap;
@@ -123,7 +140,7 @@ EMSCRIPTEN_KEEPALIVE int *sm_hids(void) { return ibuf; }
 EMSCRIPTEN_KEEPALIVE float *sm_heights(int scale, int x, int z, int w, int h)
 {
     if (g_dim != DIM_OVERWORLD || g_mc < MC_1_18) return 0;
-    if (sn_seed != g_seed) { initSurfaceNoise(&sn, DIM_OVERWORLD, g_seed); sn_seed = g_seed; }
+    surface();
     if ((size_t)w * h > hcap) {
         free(hbuf); free(ibuf); hcap = (size_t)w * h;
         hbuf = malloc(hcap * sizeof(float)); ibuf = malloc(hcap * sizeof(int));

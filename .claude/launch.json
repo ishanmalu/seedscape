@@ -1,6 +1,0 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    { "name": "seedmap", "runtimeExecutable": "npx", "runtimeArgs": ["-y", "serve", "-l", "5173", "public"], "port": 5173 }
-  ]
-}

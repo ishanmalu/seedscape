@@ -1,29 +1,11 @@
 // 3D diorama of a square of terrain: one instanced column per 4x4 blocks.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { badgeEvents } from './icons.js';
 
 const SEA = 63;
 const EXAG = 1.35;          // vertical exaggeration
 const yOf = (h) => (Math.round(h) / 4) * EXAG;
-
-function pinTexture(color, letter) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d');
-  g.shadowColor = 'rgba(0,0,0,.5)';
-  g.shadowBlur = 12;
-  g.beginPath(); g.arc(64, 64, 44, 0, Math.PI * 2);
-  g.fillStyle = color; g.fill();
-  g.shadowBlur = 0;
-  g.lineWidth = 6; g.strokeStyle = 'rgba(10,12,16,.85)'; g.stroke();
-  g.fillStyle = '#0d0f12';
-  g.font = '700 50px Inter, system-ui, sans-serif';
-  g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(letter, 64, 67);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
 
 export function createView3D(container, tooltip) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -55,6 +37,14 @@ export function createView3D(container, tooltip) {
   scene.add(sun, sun.target);
 
   let group = null, pins = [], raf = 0, running = false, intro = 0;
+
+  // Badge canvases may still be rasterising their icon; refresh when they do.
+  const texture = (canvas) => {
+    const t = new THREE.CanvasTexture(canvas);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  badgeEvents.addEventListener('load', () => pins.forEach((p) => (p.material.map.needsUpdate = true)));
 
   function clear() {
     if (!group) return;
@@ -122,7 +112,7 @@ export function createView3D(container, tooltip) {
       const i = Math.floor((p.x - x0) / 4), j = Math.floor((p.z - z0) / 4);
       if (i < 0 || j < 0 || i >= n || j >= n) continue;
       const top = Math.max(yOf(heights[j * n + i]), seaY);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: pinTexture(p.color, p.letter), depthTest: false }));
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture(p.badge), depthTest: false }));
       sprite.scale.setScalar(7);
       sprite.position.set(i - n / 2 + 0.5, top + 12, j - n / 2 + 0.5);
       sprite.renderOrder = 10;

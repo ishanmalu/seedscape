@@ -51,7 +51,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .pill { border-radius: 999px; }
 
-#seedbar { top: 16px; left: 16px; width: 320px; padding: 14px; }
+#seedbar { top: 16px; left: 16px; width: 344px; padding: 14px; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15px; letter-spacing: -.01em; margin: 0 2px 12px; }
 .logo {
   width: 18px; height: 18px; border-radius: 5px; background: var(--grad);
@@ -92,6 +92,7 @@ button { cursor: pointer; border: 0; background: none; }
 .primary:active { transform: scale(.97); }
 
 .chips { display: flex; gap: 6px; margin-top: 8px; }
+.seed select { flex: none; width: 92px; }
 select {
   appearance: none;
   background: rgba(255, 255, 255, .05) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238d95a3' fill='none' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 9px center;
@@ -113,12 +114,13 @@ select option { background: #151922; }
 }
 .seg button {
   flex: 1;
-  padding: 5px 9px;
+  padding: 5px 7px;
   border-radius: 8px;
   font-size: 12.5px; font-weight: 500;
   color: var(--muted);
   transition: background .2s, color .2s;
   white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
 }
 .seg button:hover { color: var(--text); }
 .seg button.on { background: rgba(255, 255, 255, .11); color: var(--text); box-shadow: 0 1px 0 rgba(255,255,255,.06) inset; }
@@ -126,7 +128,7 @@ select option { background: #151922; }
 
 /* ---------- cards ---------- */
 #layers-card {
-  top: 196px; left: 16px; width: 320px;
+  top: 196px; left: 16px; width: 344px;
   max-height: calc(100vh - 196px - 76px);
   display: flex; flex-direction: column;
   overflow: hidden;
@@ -145,13 +147,16 @@ select option { background: #151922; }
 
 #layers .group { font-size: 11px; color: #626a78; margin: 8px 8px 4px; font-weight: 500; }
 .layer {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
   padding: 6px 8px; border-radius: 10px;
   cursor: pointer; user-select: none;
   transition: background .15s, opacity .15s;
 }
 .layer:hover { background: rgba(255, 255, 255, .05); }
-.layer input { display: none; }
+.layer input { position: absolute; opacity: 0; pointer-events: none; }
+.layer:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+button:focus-visible, select:focus-visible, #nearby li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .layer .name { flex: 1; }
 .layer small { color: #626a78; }
 .layer:not(.on) { opacity: .45; }
@@ -168,7 +173,7 @@ select option { background: #151922; }
 .layer.on .toggle { background: var(--accent); }
 .layer.on .toggle::after { transform: translateX(12px); background: #0b0d12; }
 .swatch {
-  width: 20px; height: 20px; border-radius: 7px; flex: none;
+  width: 22px; height: 22px; border-radius: 7px; flex: none; color: #0b0d12;
   display: grid; place-items: center;
   font-size: 10.5px; font-weight: 700; color: #0d0f12;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, .35) inset;

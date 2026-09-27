@@ -5,14 +5,12 @@ const TILE = 256;
 const SEA = 63;
 const mod = await createModule();
 let current = '';
-let dimNow = 0;
 
 function init(mc, seed, dim) {
   const key = `${mc}|${seed}|${dim}`;
   if (key === current) return;
   mod._sm_init(mc, BigInt(seed), dim);
   current = key;
-  dimNow = dim;
 }
 
 const out = () => mod._sm_out() >> 2;
@@ -107,7 +105,7 @@ function tile({ tx, tz, bpp, structs, relief }) {
 }
 
 // A square of terrain for the 3D view: heights and biome colours, 4 blocks per cell.
-function terrain({ x, z, n }) {
+function terrain({ x, z, n, structs }) {
   const x0 = Math.floor((x - n * 2) / 4) * 4, z0 = Math.floor((z - n * 2) / 4) * 4;
   const hs = heights(4, x0, z0, n, n);
   if (!hs) return { error: 'Heights are only available in the Overworld on 1.18+.' };
@@ -118,22 +116,23 @@ function terrain({ x, z, n }) {
     const c = mod._sm_color(ids[i]);
     colors[i * 3] = mod.HEAPU8[c]; colors[i * 3 + 1] = mod.HEAPU8[c + 1]; colors[i * 3 + 2] = mod.HEAPU8[c + 2];
   }
-  return { x0, z0, n, heights: hs, ids: Uint8Array.from(ids), colors };
+  const found = [];
+  for (const t of structs) {
+    const c = mod._sm_structures(t, x0, z0, x0 + n * 4 - 1, z0 + n * 4 - 1);
+    for (const [px, pz] of pairs(c)) found.push({ t, x: px, z: pz });
+  }
+  return { x0, z0, n, heights: hs, ids: Uint8Array.from(ids), colors, found };
 }
 
-function world({ strongholds }) {
-  mod._sm_spawn();
-  const spawn = pairs(1)[0];
-  const sh = strongholds ? pairs(mod._sm_strongholds(128)) : [];
-  const names = {}, colors = {};
+function world({ dim }) {
+  let spawn = null;
+  if (dim === 0) { mod._sm_spawn(); spawn = pairs(1)[0]; }
+  const names = {};
   for (let i = 0; i < 256; i++) {
     const name = mod.UTF8ToString(mod._sm_biome_name(i));
-    if (!name || name === '?') continue;
-    const c = mod._sm_color(i);
-    names[i] = name;
-    colors[i] = `rgb(${mod.HEAPU8[c]},${mod.HEAPU8[c + 1]},${mod.HEAPU8[c + 2]})`;
+    if (name && name !== '?') names[i] = name;
   }
-  return { spawn, strongholds: sh, names, colors };
+  return { spawn, names };
 }
 
 self.onmessage = ({ data }) => {
@@ -148,6 +147,8 @@ self.onmessage = ({ data }) => {
       self.postMessage({ id, ...r }, r.heights ? [r.heights.buffer, r.colors.buffer] : []);
     } else if (kind === 'world') {
       self.postMessage({ id, ...world(data) });
+    } else if (kind === 'strongholds') {
+      self.postMessage({ id, strongholds: pairs(mod._sm_strongholds(128)) });
     }
   } catch (e) {
     self.postMessage({ id, error: String(e) });
