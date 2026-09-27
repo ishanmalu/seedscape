@@ -5,7 +5,7 @@ structures, strongholds and spawn, with shaded relief, a 3D terrain view, a
 seed finder and biome search. Everything runs in your browser. There's no
 server, no account and no ads.
 
-**Live:** https://seedscape.vercel.app
+**Live:** https://seedscape.ishanmalu.dev
 
 ![Seedscape: a relief map of a Minecraft world](public/og.jpg)
 
