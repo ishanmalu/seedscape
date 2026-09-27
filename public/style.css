@@ -202,7 +202,7 @@ button:focus-visible, select:focus-visible, #nearby li:focus-visible { outline: 
 
 #nearby-card {
   top: 76px; right: 16px; width: 280px;
-  max-height: calc(100vh - 76px - 90px);
+  max-height: calc(100vh - 76px - 200px); /* clear of the zoom and tool buttons */
   display: flex; flex-direction: column;
   overflow: hidden;
 }
@@ -462,3 +462,16 @@ header .credit { margin-left: 4px; }
 /* The main panel is narrow: keep the credit text, show coffee as an icon. */
 #seedbar .credit.coffee span { display: none; }
 #seedbar .credit.coffee { padding: 5px; margin-left: -2px; }
+
+/* ---------- phones: bottom bar gets the full width; zoom/tools stack above it ---------- */
+@media (max-width: 760px) {
+  #modebar { left: 10px; right: 10px; bottom: 10px; justify-content: space-between; }
+  #modebar .seg button { padding: 6px 9px; }
+  #open-finder { padding: 8px 10px; }
+  #zoom { right: 10px; bottom: 122px; flex-direction: column; }
+  #zoom .sep { width: auto; height: 1px; margin: 2px 4px; }
+  #status { top: auto; bottom: 122px; left: 10px; transform: none; }
+  #layers-card { right: 62px; }
+  #toast { bottom: 176px; }
+  #readout { bottom: 176px; }
+}

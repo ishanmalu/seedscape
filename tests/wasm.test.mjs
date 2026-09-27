@@ -70,6 +70,17 @@ test('every Natural palette name is a real biome', () => {
   assert.deepEqual(unknown, []);
 });
 
+test('surface map (sampled at y 320) shows no cave biomes', () => {
+  m._sm_init(MC, 12345n, 0);
+  m._sm_biomes(4, -128, -128, 256, 256, 80); // what worker.js does for the surface
+  const ids = m.HEAP32.subarray(m._sm_ids() >> 2, (m._sm_ids() >> 2) + 256 * 256);
+  const caves = new Set(['lush_caves', 'dripstone_caves', 'deep_dark']);
+  assert.ok(![...ids].some((id) => caves.has(biomeName(id))));
+  // ...while the same area at sea level does contain them (under mountains).
+  m._sm_biomes(4, -128, -128, 256, 256, 16);
+  assert.ok([...m.HEAP32.subarray(m._sm_ids() >> 2, (m._sm_ids() >> 2) + 256 * 256)].some((id) => caves.has(biomeName(id))));
+});
+
 test('seed text matches Java', () => {
   assert.equal(javaHash('hello'), 99162322);
   assert.equal(javaHash('\u{1F600}'), 1772899); // surrogate pair, as Java sees it
