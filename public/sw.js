@@ -1,7 +1,7 @@
 // Offline support. Site files are network-first (so a deploy is never mixed
 // with stale files), with the cache as the offline fallback. Bump VERSION when
 // the file list changes, to drop old caches.
-const VERSION = 'seedscape-v3';
+const VERSION = 'seedscape-v4';
 
 const CORE = ['./', 'style.css', 'app.js', 'icons.js', 'finder-ui.js', 'view3d.js',
   'worker.js', 'finder.js', 'cubiomes.mjs', 'cubiomes.wasm',
@@ -26,7 +26,9 @@ self.addEventListener('fetch', (e) => {
 async function networkFirst(req) {
   const cache = await caches.open(VERSION);
   try {
-    const res = await fetch(req);
+    // Always revalidate with the server (cheap: unchanged files are a 304), so
+    // HTML, JS and WebAssembly from one deploy are never mixed with another's.
+    const res = await fetch(req, { cache: 'no-cache' });
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch {
