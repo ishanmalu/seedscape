@@ -130,7 +130,10 @@ function shade(rgba, hs, cells, s) {
 async function tile({ tx, tz, bpp, relief, y, mc, seed, dim }) {
   const key = `b|${CACHE_V}|${mc}|${seed}|${dim}|${relief ? 1 : 0}|${y ?? 's'}|${palette}|${bpp}|${tx}|${tz}`;
   const hit = await cacheGet(key);
-  if (hit) return { bitmap: await createImageBitmap(hit.png), ids: hit.ids, cells: hit.cells, slime: hit.slime };
+  if (hit) {
+    try { return { bitmap: await createImageBitmap(hit.png), ids: hit.ids, cells: hit.cells, slime: hit.slime }; }
+    catch {} // unreadable cache entry: fall through and regenerate (overwrites it)
+  }
   // Messages can interleave while awaiting the cache; restore this request's
   // generator and palette before generating.
   init(mc, seed, dim);
@@ -222,7 +225,7 @@ function biomeRGB(id) {
 }
 const hash = (i, j) => { let h = (i * 374761393 + j * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) & 255) / 255; };
 
-function mesh({ x, z, n, s, structs }) {
+function mesh({ x, z, n, s, structs: types }) {
   const x0 = Math.floor((x - (n * s) / 2) / s) * s, z0 = Math.floor((z - (n * s) / 2) / s) * s;
   const hs = heights(s, x0, z0, n, n);
   if (!hs) return { error: '3D terrain is only available in the Overworld on 1.18+.' };
@@ -304,7 +307,7 @@ function mesh({ x, z, n, s, structs }) {
   }
 
   const found = [];
-  for (const t of structs) {
+  for (const t of types) {
     const c = mod._sm_structures(t, x0, z0, x0 + n * s - 1, z0 + n * s - 1);
     for (const [px, pz] of pairs(c)) found.push({ t, x: px, z: pz });
   }

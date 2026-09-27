@@ -35,6 +35,10 @@ export function createView3D(container, { tooltip, readout, onPick }) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.append(renderer.domElement);
+  // Phones can drop the GPU context (backgrounding, memory pressure). Allow it
+  // to be restored, then rebuild the last scene.
+  renderer.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault());
+  renderer.domElement.addEventListener('webglcontextrestored', () => { if (data) build(data, lastMarkers, true); });
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x131a29, 300, 800);
@@ -64,7 +68,7 @@ export function createView3D(container, { tooltip, readout, onPick }) {
   cursor.visible = false;
   scene.add(cursor);
 
-  let data = null, group = null, pins = [], coordLayer = null, raf = 0, running = false, intro = 0, showCoords = true;
+  let data = null, lastMarkers = [], group = null, pins = [], coordLayer = null, raf = 0, running = false, intro = 0, showCoords = true;
 
   const texture = (canvas) => {
     const t = new THREE.CanvasTexture(canvas);
@@ -114,6 +118,7 @@ export function createView3D(container, { tooltip, readout, onPick }) {
   function build(d, markers, keepCamera) {
     if (group) { scene.remove(group); dispose(group); }
     data = d;
+    lastMarkers = markers;
     pins = [];
     coordLayer = null;
     group = new THREE.Group();

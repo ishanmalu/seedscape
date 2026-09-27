@@ -99,6 +99,10 @@ function spawnWorker() {
   workers.push(slot);
 }
 for (let i = 0; i < POOL; i++) spawnWorker();
+setTimeout(() => {
+  if (!workers.some((w) => w.ready))
+    toast('The map engine didn’t start. Seedscape needs a recent browser (Chrome, Edge, Firefox or Safari 16.4+).');
+}, 15000);
 
 function send(slot, msg, cb) {
   const id = ++reqId;
@@ -488,6 +492,7 @@ function regenerate() {
   pending.clear();
   for (const [k, t] of tiles) if (!k.startsWith(gen + ':')) { t.bitmap.close?.(); tiles.delete(k); }
   for (const k of stiles.keys()) if (!k.startsWith(gen + ':')) stiles.delete(k);
+  layouts.clear();
   request();
   if (settings.mode === '3d') enter3D();
   oneOff({ kind: 'world', dim: settings.dim }, (r) => { world = r; nearbySig = ''; legendSig = ''; fillLocate(); draw(); finder.refresh(); });
@@ -605,6 +610,10 @@ function saveHash() {
 }
 function loadHash() {
   const p = new URLSearchParams(location.hash.slice(1));
+  // Start from defaults: anything the link doesn't mention must not carry over
+  // from the previous view (e.g. opening a Java seed while on Bedrock).
+  Object.assign(settings, { mc: 28, dim: 0, mode: 'relief', size: 4, y: null, palette: 'classic', edition: 'java' });
+  Object.assign(view, { x: 0, z: 0, ppb: 0.25 });
   const seedText = p.get('seed') ?? randomSeed();
   setSeedText(seedText);
   // Links can be hand-edited; ignore anything that isn't valid.
@@ -801,10 +810,10 @@ function showDetails(m, sx, sy) {
       <button class="ghost" data-a="pin">${svg('pin', 13)} Pin</button>
       ${settings.dim === 0 ? `<button class="ghost" data-a="3d">${svg('cube', 13)} 3D here</button>` : ''}
     </div>`;
-  const w = canvas.clientWidth;
-  el.style.left = Math.min(sx + 14, w - 250) + 'px';
-  el.style.top = sy + 14 + 'px';
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  el.style.left = Math.max(8, Math.min(sx + 14, w - 250)) + 'px';
   el.hidden = false;
+  el.style.top = Math.max(8, Math.min(sy + 14, h - el.offsetHeight - 8)) + 'px';
   $('tooltip').hidden = true;
   el.onclick = async (e) => {
     const a = e.target.closest('button')?.dataset.a;
@@ -1222,7 +1231,11 @@ const finder = initFinder({
   parseSeed, randomSeed, pretty,
   open(seed, x, z, dim) {
     setSeedText(seed);
-    if (dim !== settings.dim) { settings.dim = dim; syncSegs(); buildLayers(); }
+    if (dim !== settings.dim) {
+      settings.dim = dim;
+      if (dim !== 0 && settings.mode === '3d') setMode('relief');
+      syncSegs(); buildLayers(); renderWaypoints();
+    }
     view.x = x; view.z = z;
     view.ppb = Math.max(view.ppb, 0.5);
     regenerate();
@@ -1259,7 +1272,12 @@ async function renderImage(W) {
   const list = [];
   for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) list.push([tx, tz]);
   let doneCount = 0;
-  await Promise.all(list.map(async ([tx, tz]) => {
+  // Jobs for a world that's no longer current are dropped, so give up if the
+  // seed, version or dimension changes mid-export.
+  const g0 = gen;
+  let watch = 0;
+  const cancelled = new Promise((res) => { watch = setInterval(() => gen !== g0 && res('cancelled'), 250); });
+  const work = Promise.all(list.map(async ([tx, tz]) => {
     const [img, st] = await Promise.all([
       job({ kind: 'tile', tx, tz, bpp, relief: relief(), y: settings.y, palette: settings.palette }),
       types.length ? job({ kind: 'structs', tx, tz, bpp, types }) : { byType: {} },
@@ -1269,6 +1287,9 @@ async function renderImage(W) {
     results.push(st);
     toast(`Rendering… ${++doneCount} / ${list.length} tiles`);
   }));
+  const outcome = await Promise.race([work, cancelled]);
+  clearInterval(watch);
+  if (outcome === 'cancelled') return null;
   // Markers.
   g.imageSmoothingEnabled = true;
   const size = Math.max(10, Math.round(W / 110));
@@ -1297,10 +1318,15 @@ async function renderImage(W) {
 }
 async function saveImage(W, label) {
   if (settings.mode === '3d') { toast('Switch to Map or Relief to export an image.'); return; }
+  if (!canvas.clientWidth || !canvas.clientHeight) { toast('Nothing to export: the map isn’t visible.'); return; }
   toast(`Rendering ${label}…`);
   const img = await renderImage(W);
+  if (!img) { toast('Export cancelled: the world changed.'); return; }
+  // Text seeds can contain characters that aren't allowed in file names.
+  const safe = (settings.seedText || signed(settings.seed)).replace(/[^\w.-]+/g, '_').slice(0, 40);
   img.toBlob((blob) => {
-    download(`seedscape-${settings.seedText || signed(settings.seed)}-${Math.round(view.x)}_${Math.round(view.z)}.png`, blob);
+    if (!blob) { toast('Couldn’t create the image. Try a smaller export.'); return; }
+    download(`seedscape-${safe}-${Math.round(view.x)}_${Math.round(view.z)}.png`, blob);
     toast(`Saved ${label} (${img.width} × ${img.height}).`);
   }, 'image/png');
 }
@@ -1435,6 +1461,10 @@ function nearestStructure(st) {
   else { view.ppb = Math.max(1 / st.maxBpp, view.ppb / 4); changed(); toast(`No ${st.name} loaded here yet; zoomed out to look further.`); }
 }
 $('cmd-open').insertAdjacentHTML('afterbegin', svg('command', 14));
+if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+  $('cmd-open').querySelector('kbd').textContent = 'Ctrl K';
+  $('cmd-open').title = 'Command palette (Ctrl+K)';
+}
 $('cmd-open').onclick = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
 
 $('goto').onsubmit = (e) => {
@@ -1450,7 +1480,8 @@ $('layers-toggle').onclick = () => {
   $('layers-toggle').setAttribute('aria-expanded', !c);
 };
 window.addEventListener('keydown', (e) => {
-  if (e.target.matches?.('input, select')) return;
+  if (e.target.matches?.('input, select, textarea')) return;
+  if (!$('welcome').hidden || !($('cmdk')?.hidden ?? true)) return;
   if (e.key === 'Escape') { if (tools.active()) useTool(tools.active()); hideDetails(); }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'r' && settings.mode !== '3d') useTool('ruler');

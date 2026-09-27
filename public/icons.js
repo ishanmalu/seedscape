@@ -1,3 +1,8 @@
+// Canvas roundRect arrived in Safari 16; older browsers get plain rectangles
+// rather than an exception mid-draw.
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect)
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h) { this.rect(x, y, w, h); };
+
 // Escape text for HTML (waypoint names come from share links).
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 

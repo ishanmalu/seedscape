@@ -55,6 +55,16 @@ test('finder: spawn-relative hits have a village near the exact spawn', () => {
   }
 });
 
+test('finder: End city hits match the map (terrain check included)', () => {
+  const seeds = find([[1, 20, 1500, 1, 0]], { count: 300 });
+  assert.ok(seeds.length > 0);
+  for (const s of seeds.slice(0, 4)) {
+    m._sm_init(MC, s, 1);
+    const near = pairs(m._sm_structures(20, -1500, -1500, 1500, 1500)).filter(([x, z]) => x * x + z * z <= 1500 ** 2);
+    assert.ok(near.length >= 1, `seed ${s}`);
+  }
+});
+
 test('biome search lands on the requested biome', () => {
   m._sm_init(MC, 12345n, 0);
   const cherry = [...Array(256).keys()].find((i) => biomeName(i) === 'cherry_grove');
@@ -95,4 +105,18 @@ test('pin files round-trip', () => {
   assert.deepEqual(parsePins(json, 0), [{ name: 'Base', x: 10, z: -20, dim: -1 }]);
   const xaero = 'waypoint:Home:H:100:64:-50:0:false:0:gui.xaero_default:false:0:0:false';
   assert.deepEqual(parsePins(xaero, 0), [{ name: 'Home', x: 100, z: -50, dim: 0 }]);
+});
+
+test('CSP in vercel.json allows exactly the inline scripts in the pages', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const csp = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url)))
+    .headers[0].headers.find((h) => h.key.startsWith('Content-Security-Policy')).value;
+  for (const page of ['index.html', 'compare.html']) {
+    const html = readFileSync(new URL(`../public/${page}`, import.meta.url), 'utf8');
+    for (const [, body] of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
+      const hash = `'sha256-${createHash('sha256').update(body).digest('base64')}'`;
+      assert.ok(csp.includes(hash), `${page}: inline script hash ${hash} missing from the CSP`);
+    }
+  }
 });

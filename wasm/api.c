@@ -18,8 +18,6 @@ static unsigned char *pix;
 static int *cache;
 static size_t pix_cap, cache_cap;
 
-EMSCRIPTEN_KEEPALIVE int sm_newest(void) { return MC_NEWEST; }
-
 EMSCRIPTEN_KEEPALIVE void sm_init(int mc, uint64_t seed, int dim)
 {
     if (!colors_ready) { initBiomeColors(colors); colors_ready = 1; }
@@ -33,8 +31,14 @@ EMSCRIPTEN_KEEPALIVE unsigned char *sm_biomes(int scale, int x, int z, int w, in
 {
     Range r = { scale, x, z, w, h, y, 1 };
     size_t need = getMinCacheSize(&g, scale, w, 1, h);
-    if (need > cache_cap) { free(cache); cache = malloc(need * sizeof(int)); cache_cap = need; }
-    if ((size_t)w * h * 4 > pix_cap) { free(pix); pix_cap = (size_t)w * h * 4; pix = malloc(pix_cap); }
+    if (need > cache_cap) {
+        free(cache); cache = malloc(need * sizeof(int)); cache_cap = cache ? need : 0;
+        if (!cache) return 0;
+    }
+    if ((size_t)w * h * 4 > pix_cap) {
+        free(pix); pix = malloc((size_t)w * h * 4); pix_cap = pix ? (size_t)w * h * 4 : 0;
+        if (!pix) return 0;
+    }
     if (genBiomes(&g, cache, r)) return 0;
     for (int i = 0; i < w * h; i++) {
         int id = cache[i];
@@ -102,7 +106,7 @@ EMSCRIPTEN_KEEPALIVE int sm_spawn(void)
 EMSCRIPTEN_KEEPALIVE int sm_strongholds(int count)
 {
     StrongholdIter sh;
-    Generator og;
+    static Generator og; // ~25 KB: keep it off the small wasm stack
     setupGenerator(&og, g_mc, 0);
     applySeed(&og, DIM_OVERWORLD, g_seed);
     initFirstStronghold(&sh, g_mc, g_seed);
@@ -118,14 +122,16 @@ EMSCRIPTEN_KEEPALIVE int sm_strongholds(int count)
 // Slime chunks in a chunk rectangle, as a byte mask (1 = slime).
 EMSCRIPTEN_KEEPALIVE unsigned char *sm_slime(int cx, int cz, int w, int h)
 {
-    if ((size_t)w * h > pix_cap) { free(pix); pix_cap = (size_t)w * h; pix = malloc(pix_cap); }
+    if ((size_t)w * h > pix_cap) {
+        free(pix); pix = malloc((size_t)w * h); pix_cap = pix ? (size_t)w * h : 0;
+        if (!pix) return 0;
+    }
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
             pix[j*w+i] = isSlimeChunk(g_seed, cx+i, cz+j);
     return pix;
 }
 
-EMSCRIPTEN_KEEPALIVE int sm_str2mc(const char *s) { return str2mc(s); }
 EMSCRIPTEN_KEEPALIVE int *sm_ids(void) { return cache; }
 EMSCRIPTEN_KEEPALIVE unsigned char *sm_color(int id) { return colors[id & 255]; }
 
@@ -144,6 +150,7 @@ EMSCRIPTEN_KEEPALIVE float *sm_heights(int scale, int x, int z, int w, int h)
     if ((size_t)w * h > hcap) {
         free(hbuf); free(ibuf); hcap = (size_t)w * h;
         hbuf = malloc(hcap * sizeof(float)); ibuf = malloc(hcap * sizeof(int));
+        if (!hbuf || !ibuf) { free(hbuf); free(ibuf); hbuf = 0; ibuf = 0; hcap = 0; return 0; }
     }
     if (scale == 4) {
         if (mapApproxHeight(hbuf, ibuf, &g, &sn, x >> 2, z >> 2, w, h)) return 0;
@@ -167,6 +174,7 @@ EMSCRIPTEN_KEEPALIVE int *sm_surface_biomes(int scale, int x, int z, int w, int 
 {
     int cw = (w + 3) / 4, ch = (h + 3) / 4;
     int *coarse = malloc(sizeof(int) * cw * ch);
+    if (!coarse) return ibuf;
     for (int k = 0; k < cw * ch; k++) coarse[k] = -1;
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++) {
@@ -330,8 +338,9 @@ static int viable(int type, Generator *gen, int x, int z, uint64_t seed)
 {
     if (!isViableStructurePos(type, gen, x, z, 0)) return 0;
     if (type == End_City) {
-        SurfaceNoise esn;
-        initSurfaceNoise(&esn, DIM_END, seed);
+        static SurfaceNoise esn; // ~19 KB: static, and rebuilt only when the seed changes
+        static uint64_t esn_seed = ~0ULL;
+        if (esn_seed != seed) { initSurfaceNoise(&esn, DIM_END, seed); esn_seed = seed; }
         return isViableEndCityTerrain(gen, &esn, x, z);
     }
     if (f_mc >= MC_1_18 && (type == Desert_Pyramid || type == Jungle_Temple || type == Mansion))
