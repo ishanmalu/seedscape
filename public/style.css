@@ -526,4 +526,14 @@ header .credit { margin-left: 4px; }
 .chips-list button:hover { background: rgba(255, 255, 255, .11); }
 @keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
 .shake { animation: shake .25s ease 2; }
-body.welcoming .glass:not(.welcome-card) { visibility: hidden; }
+/* Hide the map's panels (direct children of body) behind the start screen. */
+body.welcoming > .glass { visibility: hidden; }
+
+/* ---------- seed row: room for a full 20-character seed ---------- */
+#seedbar, #layers-card { width: 384px; }
+.seed { position: relative; }
+.seed select { width: 82px; }
+.seed .ghost { min-width: 34px; padding: 8px 8px; }
+#seed { padding: 9px 10px; font-size: 12.5px; }
+#saved-menu { top: calc(100% + 6px); left: 0; right: 0; margin-top: 0; }
+@media (max-width: 760px) { #seedbar, #layers-card { width: auto; } }

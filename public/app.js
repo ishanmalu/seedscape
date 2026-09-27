@@ -1109,10 +1109,11 @@ function renderSaved() {
       <button class="icon-btn" data-a="del" aria-label="Remove">${svg('close', 13)}</button>`;
     li.querySelector('b').textContent = x.name;
     li.querySelector('small').textContent = `${x.seed} · ${x.version}`;
-    li.querySelector('.open').onmousedown = (e) => { e.preventDefault(); hideSaved(); openHash(x.hash); };
-    li.querySelector('[data-a=del]').onmousedown = (e) => { e.preventDefault(); removeSeed(x.id); renderSaved(); syncSaveButton(); };
-    li.querySelector('[data-a=rename]').onmousedown = (e) => {
-      e.preventDefault();
+    // mousedown: keep focus (so the menu stays open); click: act, for mouse and keyboard alike.
+    li.querySelectorAll('button').forEach((b) => (b.onmousedown = (e) => e.preventDefault()));
+    li.querySelector('.open').onclick = () => { hideSaved(); openHash(x.hash); };
+    li.querySelector('[data-a=del]').onclick = () => { removeSeed(x.id); renderSaved(); syncSaveButton(); };
+    li.querySelector('[data-a=rename]').onclick = () => {
       const input = Object.assign(document.createElement('input'), { value: x.name, maxLength: 40 });
       input.setAttribute('aria-label', 'Name');
       li.querySelector('.open').replaceWith(input);
@@ -1128,6 +1129,10 @@ function hideSaved() { $('saved-menu').hidden = true; }
 $('seed').addEventListener('focus', () => { renderSaved(); $('saved-menu').hidden = false; });
 $('seed').addEventListener('blur', () => setTimeout(() => {
   if (!$('saved-menu').contains(document.activeElement)) hideSaved();
+}, 120));
+$('saved-menu').addEventListener('focusout', () => setTimeout(() => {
+  const a = document.activeElement;
+  if (a !== $('seed') && !$('saved-menu').contains(a)) hideSaved();
 }, 120));
 $('seed').addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideSaved(); e.target.blur(); } });
 document.addEventListener('mousedown', (e) => {
@@ -1162,7 +1167,7 @@ function showWelcome(hasLast) {
     view.x = 0; view.z = 0; view.ppb = 0.25;
     settings.dim = 0;
     if (settings.mode === '3d') setMode('relief');
-    syncSegs(); buildLayers();
+    syncSegs(); buildLayers(); renderWaypoints();
     close();
     regenerate();
   };
