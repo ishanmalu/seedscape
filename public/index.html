@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Seedmap</title>
+  <meta name="description" content="Every Minecraft seed layer on one fast map: biomes, structures, strongholds, slime chunks.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>Seedmap</h1>
+      <button id="toggle-panel" class="icon" aria-label="Toggle panel">☰</button>
+    </header>
+
+    <div class="body">
+      <label class="field">
+        <span>Seed</span>
+        <div class="row">
+          <input id="seed" autocomplete="off" spellcheck="false" placeholder="Number or text">
+          <button id="random" class="icon" title="Random seed" aria-label="Random seed">⚄</button>
+        </div>
+      </label>
+
+      <div class="row two">
+        <label class="field">
+          <span>Version</span>
+          <select id="version">
+            <option value="28">1.21.4+</option>
+            <option value="27">1.21.2 – 1.21.3</option>
+            <option value="26">1.21 – 1.21.1</option>
+            <option value="25">1.20</option>
+            <option value="24">1.19.3 – 1.19.4</option>
+            <option value="23">1.19 – 1.19.2</option>
+            <option value="22">1.18</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Dimension</span>
+          <select id="dim">
+            <option value="0">Overworld</option>
+            <option value="-1">Nether</option>
+            <option value="1">End</option>
+          </select>
+        </label>
+      </div>
+
+      <form id="goto" class="field">
+        <span>Go to</span>
+        <div class="row">
+          <input id="goto-x" inputmode="numeric" placeholder="X">
+          <input id="goto-z" inputmode="numeric" placeholder="Z">
+          <button type="submit">Go</button>
+        </div>
+      </form>
+
+      <section>
+        <h2>Layers</h2>
+        <div id="layers"></div>
+      </section>
+
+      <section>
+        <h2>Nearest to centre</h2>
+        <ol id="nearby"></ol>
+      </section>
+    </div>
+  </aside>
+
+  <main id="map">
+    <canvas id="canvas"></canvas>
+    <div id="tooltip" hidden></div>
+    <div id="status">
+      <span id="coords">0, 0</span>
+      <span id="biome"></span>
+      <span id="busy" hidden>Generating…</span>
+    </div>
+    <div id="zoom">
+      <button id="zoom-in" aria-label="Zoom in">+</button>
+      <button id="zoom-out" aria-label="Zoom out">−</button>
+      <button id="share" title="Copy link">Share</button>
+    </div>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
